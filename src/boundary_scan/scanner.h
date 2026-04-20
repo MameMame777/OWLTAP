@@ -41,6 +41,11 @@ struct ScanResult {
     }
 };
 
+/// Decode named pin states from a raw BSR snapshot using BSDL metadata.
+/// INPUT/BIDIR/CLOCK cells take priority over output-only cells for the same pin.
+ScanResult decodeBoundaryScan(const bsdl::BSDLDevice& device,
+                              std::vector<uint8_t> raw_bsr);
+
 /// Boundary scan operations: reads pin states using SAMPLE instruction.
 class Scanner {
 public:

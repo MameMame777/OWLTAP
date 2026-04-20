@@ -15,13 +15,21 @@
 #endif
 
 #include <algorithm>
+#include <array>
+#include <cfloat>
+#include <cstring>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
+#include <set>
+#include <thread>
 
 #include "app_config.h"
 #include "debug_log_panel.h"
 #include "device_dialog.h"
 #include "hex_panel.h"
 #include "signal_panel.h"
+#include "src/script/script_engine.h"
 #include "trigger_dialog.h"
 #include "vcd_export.h"
 #include "waveform_view.h"
@@ -40,6 +48,133 @@ static std::string firstLineOf(const std::string& message) {
     }
     return message.substr(0, newline_pos);
 }
+
+static std::string normalizeLineEndings(const std::string& input) {
+    std::string result;
+    result.reserve(input.size());
+
+    for (size_t i = 0; i < input.size(); i++) {
+        if (input[i] == '\r') {
+            if (i + 1 < input.size() && input[i + 1] == '\n') {
+                i++;
+            }
+            result.push_back('\n');
+            continue;
+        }
+        result.push_back(input[i]);
+    }
+
+    return result;
+}
+
+static const char* pinStateLabel(jtag::PinState state) {
+    switch (state) {
+        case jtag::PinState::LOW:
+            return "LOW";
+        case jtag::PinState::HIGH:
+            return "HIGH";
+        case jtag::PinState::UNKNOWN:
+            return "UNKNOWN";
+    }
+    return "UNKNOWN";
+}
+
+static const char* stagedPinLabel(int value) {
+    if (value < 0) {
+        return "HIGH-Z";
+    }
+    return value == 0 ? "LOW" : "HIGH";
+}
+
+static std::vector<std::string> visibleDrivablePins(
+        jtag::Scanner* scanner) {
+    std::vector<std::string> result;
+    if (scanner == nullptr) {
+        return result;
+    }
+
+    const auto drivable = scanner->getDrivablePins();
+    if (drivable.empty()) {
+        return result;
+    }
+
+    const auto selected = SignalPanel::selectedSignals();
+    std::set<std::string> drivable_set(drivable.begin(), drivable.end());
+    for (const auto& pin : selected) {
+        if (drivable_set.count(pin) > 0) {
+            result.push_back(pin);
+        }
+    }
+
+    if (!result.empty()) {
+        return result;
+    }
+    return drivable;
+}
+
+class GuiScriptHost : public jtag::script::ScriptHost {
+public:
+    GuiScriptHost(jtag::Scanner& scanner, jtag::PinDriver& pin_driver,
+                  bool& extest_outputs_active)
+        : scanner_(scanner), pin_driver_(pin_driver),
+          extest_outputs_active_(extest_outputs_active) {}
+
+    bool sample(jtag::ScanResult& result, std::string& error) override {
+        result = scanner_.sample();
+        if (result.raw_bsr.empty()) {
+            error = scanner_.lastError();
+            return false;
+        }
+        pin_driver_.loadSnapshot(result.raw_bsr);
+        extest_outputs_active_ = false;
+        return true;
+    }
+
+    bool setPin(const std::string& pin_name, int value,
+                std::string& error) override {
+        if (!pin_driver_.setPin(pin_name, value)) {
+            error = pin_driver_.lastError();
+            return false;
+        }
+        return true;
+    }
+
+    bool setPinHighZ(const std::string& pin_name,
+                     std::string& error) override {
+        if (!pin_driver_.setPinHighZ(pin_name)) {
+            error = pin_driver_.lastError();
+            return false;
+        }
+        return true;
+    }
+
+    bool applyOutputs(std::string& error) override {
+        if (!pin_driver_.applyOutputs()) {
+            error = pin_driver_.lastError();
+            return false;
+        }
+        extest_outputs_active_ = true;
+        return true;
+    }
+
+    void resetToSafe() override {
+        pin_driver_.resetToSafe();
+    }
+
+    bool sleepMs(int milliseconds, std::string& error) override {
+        if (milliseconds < 0) {
+            error = "sleep duration must be >= 0";
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+        return true;
+    }
+
+private:
+    jtag::Scanner& scanner_;
+    jtag::PinDriver& pin_driver_;
+    bool& extest_outputs_active_;
+};
 
 static void syncSelectionViews(const std::vector<jtag::SampleFrame>& samples) {
     const auto selected = SignalPanel::selectedSignals();
@@ -150,6 +285,12 @@ AppWindow::AppWindow() {
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
+    std::snprintf(script_buffer_.data(), script_buffer_.size(),
+                  "# set LED0 HIGH, apply, then confirm it\n"
+                  "# set LED0 1\n"
+                  "# apply\n"
+                  "# expect LED0 1\n");
+
     setStatusMessage(status_text_);
 }
 
@@ -188,10 +329,27 @@ void AppWindow::run() {
                                    ? capture_engine_->getSamples()
                                    : std::vector<jtag::SampleFrame>{});
         }
-        if (WaveformView::draw(capture_engine_ != nullptr && !capturing_)) {
+        const bool can_capture = (capture_engine_ != nullptr && !capturing_);
+        const auto waveform_actions =
+            WaveformView::draw(can_capture, capturing_);
+        if (waveform_actions.run_requested) {
+            onStartCapture();
+        }
+        if (waveform_actions.single_requested) {
+            onSingleCapture();
+        }
+        if (waveform_actions.stop_requested) {
+            onStopCapture();
+        }
+        if (waveform_actions.clear_requested) {
             onClearWaveforms();
         }
+        if (waveform_actions.fit_requested) {
+            onFitWaveforms();
+        }
         HexPanel::draw();
+        drawPinControlPanel();
+        drawScriptRunnerPanel();
         DebugLogPanel::draw(status_text_);
 
         // Device dialog
@@ -319,6 +477,9 @@ void AppWindow::onDisconnect() {
     SignalPanel::clear();
     WaveformView::clearData();
     HexPanel::clearBuses();
+    pin_readback_ = jtag::ScanResult{};
+    pin_readback_error_.clear();
+    extest_outputs_active_ = false;
     if (had_backend_state || status_text_ != "Disconnected") {
         setStatusMessage("Disconnected");
     }
@@ -366,6 +527,7 @@ void AppWindow::onOpenBsdl() {
 
     // Create capture engine
     capture_engine_ = std::make_unique<jtag::CaptureEngine>(*scanner_);
+    extest_outputs_active_ = false;
 
     // Bind trigger dialog
     TriggerDialog::bind(scanner_.get(), &capture_engine_->trigger());
@@ -394,14 +556,24 @@ void AppWindow::onOpenBsdl() {
         // Do a test sample and show raw BSR bytes + any named pin value
         auto result = scanner_->sample();
         if (!result.raw_bsr.empty()) {
+            pin_readback_ = result;
+            if (pin_driver_) {
+                pin_driver_->loadSnapshot(result.raw_bsr);
+            }
+            pin_readback_error_.clear();
+            extest_outputs_active_ = false;
             n += snprintf(buf + n, sizeof(buf) - n, "BSR[0..7]:");
             for (size_t i = 0; i < 8 && i < result.raw_bsr.size(); i++)
                 n += snprintf(buf + n, sizeof(buf) - n, " %02X", result.raw_bsr[i]);
             int nz = 0;
             for (auto b : result.raw_bsr) if (b) nz++;
             n += snprintf(buf + n, sizeof(buf) - n,
-                " (%d/%zu non-zero bytes)", nz, result.raw_bsr.size());
+                " (%d/%zu non-zero bytes, %zu decoded pins)",
+                nz, result.raw_bsr.size(), result.pin_states.size());
         } else {
+            pin_readback_ = jtag::ScanResult{};
+            pin_readback_error_ = scanner_->lastError();
+            extest_outputs_active_ = false;
             n += snprintf(buf + n, sizeof(buf) - n, "BSR empty! Error: %s",
                 scanner_->lastError().c_str());
         }
@@ -422,17 +594,293 @@ void AppWindow::onOpenBsdl() {
         }
         setStatusMessage(buf);
     } else {
+        pin_readback_ = jtag::ScanResult{};
+        pin_readback_error_ = scanner_->lastError();
+        extest_outputs_active_ = false;
         setStatusMessage("BSDL loaded. " +
             std::to_string(scanner_->getObservablePins().size()) +
             " pins. IDCODE read failed.");
     }
 }
 
+bool AppWindow::refreshPinReadback(bool report_status) {
+    if (!scanner_) {
+        if (report_status) {
+            setStatusMessage("Scanner not ready.");
+        }
+        return false;
+    }
+
+    const auto result = scanner_->sample();
+    if (result.raw_bsr.empty()) {
+        pin_readback_error_ = scanner_->lastError();
+        if (report_status) {
+            setStatusMessage("Readback failed: " + scanner_->lastError());
+        }
+        return false;
+    }
+
+    pin_readback_ = result;
+    if (pin_driver_) {
+        pin_driver_->loadSnapshot(result.raw_bsr);
+    }
+    pin_readback_error_.clear();
+    extest_outputs_active_ = false;
+
+    if (report_status) {
+        setStatusMessage("Pin readback updated via SAMPLE (" +
+                         std::to_string(pin_readback_.pin_states.size()) +
+                         " pins decoded).");
+    }
+    return true;
+}
+
+void AppWindow::drawPinControlPanel() {
+    ImGui::Begin("Pin Control");
+
+    if (!scanner_ || !pin_driver_) {
+        ImGui::TextDisabled("Load a BSDL file to enable EXTEST pin control.");
+        ImGui::End();
+        return;
+    }
+
+    if (capturing_) {
+        ImGui::TextDisabled("Stop capture before driving pins.");
+        ImGui::End();
+        return;
+    }
+
+    const bool drive_allowed = pin_driver_->extestAllowed();
+    const std::string drive_block_reason =
+        drive_allowed ? std::string{} : pin_driver_->extestBlockedReason();
+
+    const auto pins = visibleDrivablePins(scanner_.get());
+    if (pins.empty()) {
+        ImGui::TextDisabled("No drivable pins were found in the loaded BSDL.");
+        ImGui::End();
+        return;
+    }
+
+    if (ImGui::Button(extest_outputs_active_ ? "Readback (release EXTEST)"
+                                             : "Readback")) {
+        refreshPinReadback(true);
+    }
+    ImGui::SameLine();
+    if (!drive_allowed) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Apply Staged")) {
+        if (pin_driver_->applyOutputs()) {
+            extest_outputs_active_ = true;
+            pin_readback_error_.clear();
+            setStatusMessage(
+                "Applied staged EXTEST outputs. They remain active until SAMPLE/readback/capture changes the instruction.");
+        } else {
+            setStatusMessage("Apply failed: " + pin_driver_->lastError());
+        }
+    }
+    if (!drive_allowed) {
+        ImGui::EndDisabled();
+    }
+    ImGui::SameLine();
+    if (!drive_allowed) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Reset Safe")) {
+        pin_driver_->resetToSafe();
+        if (pin_driver_->applyOutputs()) {
+            extest_outputs_active_ = true;
+            pin_readback_error_.clear();
+            setStatusMessage(
+                "Applied BSDL safe output state in EXTEST. It remains active until SAMPLE/readback/capture changes the instruction.");
+        } else {
+            setStatusMessage("Reset Safe failed: " + pin_driver_->lastError());
+        }
+    }
+    if (!drive_allowed) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::Separator();
+    if (!drive_allowed) {
+        ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f),
+                           "%s", drive_block_reason.c_str());
+        ImGui::TextDisabled(
+            "Readback is still available, but EXTEST drive is disabled to avoid resetting the running PS.");
+    } else if (extest_outputs_active_) {
+        ImGui::TextColored(ImVec4(0.85f, 0.9f, 0.45f, 1.0f),
+                           "EXTEST active: staged outputs are being driven. Readback uses SAMPLE and will release them.");
+    } else if (!pin_readback_error_.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.35f, 1.0f),
+                           "Last readback failed: %s",
+                           pin_readback_error_.c_str());
+    } else if (!pin_readback_.raw_bsr.empty()) {
+        ImGui::TextDisabled("Last readback decoded %zu pins.",
+                            pin_readback_.pin_states.size());
+    } else {
+        ImGui::TextDisabled("No successful readback yet.");
+    }
+    ImGui::TextDisabled(
+        "Showing selected drivable pins first. If none are selected, all drivable pins are shown.");
+
+    if (ImGui::BeginTable("pin_control", 6,
+                          ImGuiTableFlags_Borders |
+                          ImGuiTableFlags_RowBg |
+                          ImGuiTableFlags_Resizable)) {
+        ImGui::TableSetupColumn("Pin");
+        ImGui::TableSetupColumn("Observed (SAMPLE)");
+        ImGui::TableSetupColumn("Staged");
+        ImGui::TableSetupColumn("Low");
+        ImGui::TableSetupColumn("High");
+        ImGui::TableSetupColumn("Z");
+        ImGui::TableHeadersRow();
+
+        for (size_t i = 0; i < pins.size(); i++) {
+            const auto& pin = pins[i];
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::TableNextRow();
+
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(pin.c_str());
+
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(pinStateLabel(pin_readback_.getPin(pin)));
+
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(stagedPinLabel(pin_driver_->getPinValue(pin)));
+
+            ImGui::TableNextColumn();
+            if (!drive_allowed) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::SmallButton("0")) {
+                if (pin_driver_->setPin(pin, 0)) {
+                    setStatusMessage("Staged " + pin + " = LOW");
+                } else {
+                    setStatusMessage("Stage failed: " + pin_driver_->lastError());
+                }
+            }
+            if (!drive_allowed) {
+                ImGui::EndDisabled();
+            }
+
+            ImGui::TableNextColumn();
+            if (!drive_allowed) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::SmallButton("1")) {
+                if (pin_driver_->setPin(pin, 1)) {
+                    setStatusMessage("Staged " + pin + " = HIGH");
+                } else {
+                    setStatusMessage("Stage failed: " + pin_driver_->lastError());
+                }
+            }
+            if (!drive_allowed) {
+                ImGui::EndDisabled();
+            }
+
+            ImGui::TableNextColumn();
+            if (!drive_allowed) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::SmallButton("Z")) {
+                if (pin_driver_->setPinHighZ(pin)) {
+                    setStatusMessage("Staged " + pin + " = HIGH-Z");
+                } else {
+                    setStatusMessage("Stage failed: " + pin_driver_->lastError());
+                }
+            }
+            if (!drive_allowed) {
+                ImGui::EndDisabled();
+            }
+            ImGui::PopID();
+        }
+
+        ImGui::EndTable();
+    }
+
+    ImGui::End();
+}
+
+void AppWindow::drawScriptRunnerPanel() {
+    ImGui::Begin("Script Runner");
+
+    ImGui::TextDisabled("%s",
+                        script_path_.empty() ? "Unsaved script"
+                                             : script_path_.c_str());
+    if (ImGui::Button("Load Script...")) {
+        onLoadScript();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Save Script")) {
+        onSaveScript(false);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Save Script As...")) {
+        onSaveScript(true);
+    }
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Commands: sample, read, set, highz, apply, expect, sleep, reset_safe");
+    ImGui::InputTextMultiline("##script_text", script_buffer_.data(),
+                              script_buffer_.size(), ImVec2(-FLT_MIN, 220.0f));
+
+    const bool can_run_script = scanner_ != nullptr && pin_driver_ != nullptr &&
+        !capturing_;
+    if (!can_run_script) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Run Script")) {
+        GuiScriptHost host(*scanner_, *pin_driver_, extest_outputs_active_);
+        const auto result = jtag::script::ScriptEngine::run(
+            std::string(script_buffer_.data()), host);
+        script_output_ = result.output;
+        if (result.success) {
+            if (extest_outputs_active_) {
+                setStatusMessage(
+                    "Script completed successfully. EXTEST outputs remain active until SAMPLE/readback/capture changes the instruction.");
+            } else {
+                setStatusMessage("Script completed successfully.");
+            }
+        } else {
+            setStatusMessage("Script failed at line " +
+                             std::to_string(result.failed_line) + ".");
+        }
+    }
+    if (!can_run_script) {
+        ImGui::EndDisabled();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear Output")) {
+        script_output_.clear();
+    }
+
+    if (!can_run_script) {
+        ImGui::TextDisabled(
+            "Load a BSDL and stop capture before running scripts.");
+    } else if (!pin_driver_->extestAllowed()) {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.55f, 0.35f, 1.0f),
+            "Drive commands are blocked for this device. sample/read/expect/sleep remain available.");
+    }
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Output");
+    ImGui::BeginChild("script_output", ImVec2(0.0f, 0.0f), true);
+    ImGui::TextUnformatted(script_output_.c_str());
+    ImGui::EndChild();
+
+    ImGui::End();
+}
+
 void AppWindow::onStartCapture() {
     if (!capture_engine_) return;
     if (capture_engine_->start()) {
         capturing_ = true;
+        extest_outputs_active_ = false;
         last_refresh_ = std::chrono::steady_clock::now();
+        syncSelectionViews(std::vector<jtag::SampleFrame>{});
+        WaveformView::requestResetView();
         setStatusMessage("Capturing...");
     } else {
         setStatusMessage("Capture error: " + capture_engine_->lastError());
@@ -455,7 +903,10 @@ void AppWindow::onSingleCapture() {
     capture_engine_->trigger().setMode(jtag::TriggerMode::SINGLE);
     if (capture_engine_->start()) {
         capturing_ = true;
+        extest_outputs_active_ = false;
         last_refresh_ = std::chrono::steady_clock::now();
+        syncSelectionViews(std::vector<jtag::SampleFrame>{});
+        WaveformView::requestResetView();
         setStatusMessage("Single capture...");
     }
 }
@@ -465,7 +916,21 @@ void AppWindow::onClearWaveforms() {
 
     capture_engine_->clearSamples();
     syncSelectionViews(std::vector<jtag::SampleFrame>{});
+    WaveformView::requestResetView();
     setStatusMessage("Waveform buffer cleared.");
+}
+
+void AppWindow::onFitWaveforms() {
+    if (SignalPanel::selectedSignals().empty()) {
+        setStatusMessage("No selected waveforms to fit.");
+        return;
+    }
+    if (!capture_engine_ || capture_engine_->sampleCount() == 0) {
+        setStatusMessage("No waveform data to fit.");
+        return;
+    }
+    WaveformView::requestFit();
+    setStatusMessage("Waveform view fitted to buffered range.");
 }
 
 void AppWindow::refreshFromCapture() {
@@ -475,6 +940,9 @@ void AppWindow::refreshFromCapture() {
     if (samples.empty()) return;
 
     syncSelectionViews(samples);
+    if (pin_driver_ && !samples.back().data.raw_bsr.empty()) {
+        pin_driver_->loadSnapshot(samples.back().data.raw_bsr);
+    }
 
     // Check capture state
     auto state = capture_engine_->state();
@@ -533,6 +1001,83 @@ void AppWindow::onExportCsv() {
         setStatusMessage(buf);
     } else {
         setStatusMessage("Export error: " + err);
+    }
+}
+
+bool AppWindow::loadScriptFile(const std::string& path, std::string& error) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        error = "Could not open file.";
+        return false;
+    }
+
+    std::string contents((std::istreambuf_iterator<char>(file)),
+                         std::istreambuf_iterator<char>());
+    contents = normalizeLineEndings(contents);
+    if (contents.size() >= script_buffer_.size()) {
+        error = "File is too large for the editor buffer.";
+        return false;
+    }
+
+    std::fill(script_buffer_.begin(), script_buffer_.end(), '\0');
+    std::copy(contents.begin(), contents.end(), script_buffer_.begin());
+    script_path_ = path;
+    script_output_.clear();
+    return true;
+}
+
+bool AppWindow::saveScriptFile(const std::string& path, std::string& error) const {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) {
+        error = "Could not open file for writing.";
+        return false;
+    }
+
+    file.write(script_buffer_.data(),
+               static_cast<std::streamsize>(std::strlen(script_buffer_.data())));
+    if (!file) {
+        error = "Write failed.";
+        return false;
+    }
+    return true;
+}
+
+void AppWindow::onLoadScript() {
+    const std::string path = openFileDialog(
+        "Load Script",
+        "Script Files (*.jts;*.txt)\0*.jts;*.txt\0All Files (*.*)\0*.*\0");
+    if (path.empty()) return;
+
+    std::string error;
+    if (loadScriptFile(path, error)) {
+        setStatusMessage("Script loaded: " + path);
+    } else {
+        setStatusMessage("Script load failed: " + error);
+    }
+}
+
+void AppWindow::onSaveScript(bool save_as) {
+    std::string path = script_path_;
+    if (save_as || path.empty()) {
+        path = saveFileDialog(
+            "Save Script",
+            "Script Files (*.jts;*.txt)\0*.jts;*.txt\0All Files (*.*)\0*.*\0");
+        if (path.empty()) return;
+
+        const size_t dot_pos = path.find_last_of('.');
+        const size_t slash_pos = path.find_last_of("\\/");
+        if (dot_pos == std::string::npos ||
+            (slash_pos != std::string::npos && dot_pos < slash_pos)) {
+            path += ".jts";
+        }
+    }
+
+    std::string error;
+    if (saveScriptFile(path, error)) {
+        script_path_ = path;
+        setStatusMessage("Script saved: " + path);
+    } else {
+        setStatusMessage("Script save failed: " + error);
     }
 }
 
@@ -613,6 +1158,8 @@ void AppWindow::initializeDockLayout(unsigned int dockspace_id) {
 
     ImGui::DockBuilderDockWindow("Signals", dock_signals);
     ImGui::DockBuilderDockWindow("Bus Values", dock_top);
+    ImGui::DockBuilderDockWindow("Pin Control", dock_top);
+    ImGui::DockBuilderDockWindow("Script Runner", dock_top);
     ImGui::DockBuilderDockWindow("Waveforms", dock_waveforms);
     ImGui::DockBuilderDockWindow("Debug Log", dock_log);
     ImGui::DockBuilderFinish(dockspace_id);
@@ -681,6 +1228,16 @@ void AppWindow::buildMenuBar() {
                 onOpenBsdl();
             }
             ImGui::Separator();
+            if (ImGui::MenuItem("Load Script...")) {
+                onLoadScript();
+            }
+            if (ImGui::MenuItem("Save Script")) {
+                onSaveScript(false);
+            }
+            if (ImGui::MenuItem("Save Script As...")) {
+                onSaveScript(true);
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Load Config...")) {
                 onLoadConfig();
             }
@@ -725,6 +1282,9 @@ void AppWindow::buildMenuBar() {
             ImGui::Separator();
             if (ImGui::MenuItem("Clear Waveforms", nullptr, false, can_capture)) {
                 onClearWaveforms();
+            }
+            if (ImGui::MenuItem("Fit Waveforms", nullptr, false, can_capture)) {
+                onFitWaveforms();
             }
             if (can_capture) {
                 ImGui::Separator();

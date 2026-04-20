@@ -5,15 +5,53 @@
 
 #include <algorithm>
 #include <cctype>
-#include <set>
 
 namespace jtag::gui {
 
 std::vector<SignalPanel::PinGroup> SignalPanel::groups_;
+std::vector<std::string> SignalPanel::selected_order_;
 bool SignalPanel::selection_changed_ = false;
+
+SignalPanel::PinEntry* SignalPanel::findPin(const std::string& name) {
+    for (auto& group : groups_) {
+        for (auto& pin : group.pins) {
+            if (pin.name == name) {
+                return &pin;
+            }
+        }
+    }
+    return nullptr;
+}
+
+void SignalPanel::addToSelectedOrder(const std::string& name) {
+    auto it = std::find(selected_order_.begin(), selected_order_.end(), name);
+    if (it == selected_order_.end()) {
+        selected_order_.push_back(name);
+    }
+}
+
+void SignalPanel::removeFromSelectedOrder(const std::string& name) {
+    selected_order_.erase(
+        std::remove(selected_order_.begin(), selected_order_.end(), name),
+        selected_order_.end());
+}
+
+void SignalPanel::setPinSelected(PinEntry& pin, bool selected) {
+    if (pin.selected == selected) {
+        return;
+    }
+
+    pin.selected = selected;
+    if (selected) {
+        addToSelectedOrder(pin.name);
+    } else {
+        removeFromSelectedOrder(pin.name);
+    }
+}
 
 void SignalPanel::populateFromBsdl(const jtag::bsdl::BSDLDevice& device) {
     groups_.clear();
+    selected_order_.clear();
     selection_changed_ = true;
 
     // Build from boundary_cells — this is always populated from BOUNDARY_REGISTER
@@ -94,10 +132,20 @@ void SignalPanel::populateFromBsdl(const jtag::bsdl::BSDLDevice& device) {
 }
 
 void SignalPanel::setSelectedSignals(const std::vector<std::string>& names) {
-    std::set<std::string> name_set(names.begin(), names.end());
-    for (auto& group : groups_)
-        for (auto& pin : group.pins)
-            pin.selected = name_set.count(pin.name) > 0;
+    for (auto& group : groups_) {
+        for (auto& pin : group.pins) {
+            pin.selected = false;
+        }
+    }
+
+    selected_order_.clear();
+    for (const auto& name : names) {
+        if (auto* pin = findPin(name)) {
+            pin->selected = true;
+            selected_order_.push_back(name);
+        }
+    }
+
     selection_changed_ = true;
 }
 
@@ -108,19 +156,12 @@ bool SignalPanel::consumeSelectionChanged() {
 }
 
 std::vector<std::string> SignalPanel::selectedSignals() {
-    std::vector<std::string> result;
-    for (const auto& group : groups_) {
-        for (const auto& pin : group.pins) {
-            if (pin.selected) {
-                result.push_back(pin.name);
-            }
-        }
-    }
-    return result;
+    return selected_order_;
 }
 
 void SignalPanel::clear() {
     groups_.clear();
+    selected_order_.clear();
     selection_changed_ = true;
 }
 
@@ -135,15 +176,72 @@ void SignalPanel::draw() {
 
     // Select All / Deselect All buttons
     if (ImGui::SmallButton("Select All")) {
-        for (auto& g : groups_)
-            for (auto& p : g.pins) p.selected = true;
+        selected_order_.clear();
+        for (auto& g : groups_) {
+            for (auto& p : g.pins) {
+                p.selected = true;
+                selected_order_.push_back(p.name);
+            }
+        }
         selection_changed_ = true;
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("Deselect All")) {
         for (auto& g : groups_)
             for (auto& p : g.pins) p.selected = false;
+        selected_order_.clear();
         selection_changed_ = true;
+    }
+
+    ImGui::Separator();
+
+    ImGui::TextDisabled("Selected Order");
+    if (selected_order_.empty()) {
+        ImGui::TextDisabled("Select signals to control waveform order.");
+    } else {
+        ImGui::BeginChild("selected_order", ImVec2(0.0f, 120.0f), true);
+        int move_from = -1;
+        int move_to = -1;
+
+        for (size_t i = 0; i < selected_order_.size(); i++) {
+            const bool can_move_up = i > 0;
+            const bool can_move_down = i + 1 < selected_order_.size();
+
+            ImGui::PushID(static_cast<int>(i));
+            if (!can_move_up) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::SmallButton("^")) {
+                move_from = static_cast<int>(i);
+                move_to = static_cast<int>(i - 1);
+            }
+            if (!can_move_up) {
+                ImGui::EndDisabled();
+            }
+
+            ImGui::SameLine();
+            if (!can_move_down) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::SmallButton("v")) {
+                move_from = static_cast<int>(i);
+                move_to = static_cast<int>(i + 1);
+            }
+            if (!can_move_down) {
+                ImGui::EndDisabled();
+            }
+
+            ImGui::SameLine();
+            ImGui::Text("%zu. %s", i + 1, selected_order_[i].c_str());
+            ImGui::PopID();
+        }
+
+        if (move_from >= 0 && move_to >= 0) {
+            std::swap(selected_order_[move_from], selected_order_[move_to]);
+            selection_changed_ = true;
+        }
+
+        ImGui::EndChild();
     }
 
     ImGui::Separator();
@@ -173,7 +271,9 @@ void SignalPanel::draw() {
             snprintf(group_id, sizeof(group_id), "##grp_%s",
                      group.name.c_str());
             if (ImGui::Checkbox(group_id, &group_check)) {
-                for (auto& p : group.pins) p.selected = group_check;
+                for (auto& p : group.pins) {
+                    setPinSelected(p, group_check);
+                }
                 selection_changed_ = true;
             }
             if (mixed) {
@@ -186,6 +286,11 @@ void SignalPanel::draw() {
                 snprintf(pin_id, sizeof(pin_id), "%s##%s",
                          pin.name.c_str(), pin.name.c_str());
                 if (ImGui::Checkbox(pin_id, &pin.selected)) {
+                    if (pin.selected) {
+                        addToSelectedOrder(pin.name);
+                    } else {
+                        removeFromSelectedOrder(pin.name);
+                    }
                     selection_changed_ = true;
                 }
                 ImGui::SameLine(200);

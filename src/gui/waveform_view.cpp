@@ -14,8 +14,11 @@ int WaveformView::trigger_sample_ = -1;
 double WaveformView::trigger_time_ = 0.0;
 size_t WaveformView::selected_signal_count_ = 0;
 double WaveformView::latest_time_ = 0.0;
+double WaveformView::earliest_time_ = 0.0;
 bool WaveformView::auto_scroll_ = false;
 double WaveformView::window_us_ = 10000.0;  // 10ms default window
+bool WaveformView::fit_requested_ = false;
+bool WaveformView::reset_view_requested_ = false;
 
 void WaveformView::setData(const std::vector<std::string>& signals,
                             const std::vector<jtag::SampleFrame>& samples) {
@@ -24,6 +27,7 @@ void WaveformView::setData(const std::vector<std::string>& signals,
     trigger_sample_ = -1;
     trigger_time_ = 0.0;
     latest_time_ = 0.0;
+    earliest_time_ = 0.0;
     selected_signal_count_ = signals.size();
 
     if (samples.empty() || signals.empty()) return;
@@ -53,8 +57,10 @@ void WaveformView::setData(const std::vector<std::string>& signals,
         lanes_.push_back(std::move(lane));
     }
     // Record the latest time for auto-scroll
-    if (!lanes_.empty() && !lanes_[0].times.empty())
+    if (!lanes_.empty() && !lanes_[0].times.empty()) {
+        earliest_time_ = lanes_[0].times.front();
         latest_time_ = lanes_[0].times.back();
+    }
 }
 
 void WaveformView::clearData() {
@@ -64,7 +70,10 @@ void WaveformView::clearData() {
     trigger_sample_ = -1;
     trigger_time_ = 0.0;
     latest_time_ = 0.0;
+    earliest_time_ = 0.0;
     selected_signal_count_ = 0;
+    fit_requested_ = false;
+    reset_view_requested_ = false;
 }
 
 void WaveformView::setCursorPosition(int sample_index) {
@@ -75,20 +84,58 @@ int WaveformView::cursorPosition() {
     return cursor_pos_;
 }
 
-bool WaveformView::draw(bool can_clear) {
-    bool clear_requested = false;
+void WaveformView::requestFit() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto_scroll_ = false;
+    fit_requested_ = true;
+}
+
+void WaveformView::requestResetView() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    fit_requested_ = false;
+    reset_view_requested_ = true;
+}
+
+WaveformView::DrawActions WaveformView::draw(bool can_capture, bool can_stop) {
+    DrawActions actions;
     ImGui::Begin("Waveforms");
 
-    if (!can_clear) {
+    if (!can_capture) {
         ImGui::BeginDisabled();
     }
-    clear_requested = ImGui::Button("Clear");
-    if (!can_clear) {
+    actions.run_requested = ImGui::Button("Run");
+    ImGui::SameLine();
+    actions.single_requested = ImGui::Button("Single");
+    if (!can_capture) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    if (!can_stop) {
+        ImGui::BeginDisabled();
+    }
+    actions.stop_requested = ImGui::Button("Stop");
+    if (!can_stop) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    if (!can_capture) {
+        ImGui::BeginDisabled();
+    }
+    actions.clear_requested = ImGui::Button("Clear");
+    ImGui::SameLine();
+    actions.fit_requested = ImGui::Button("Fit");
+    if (!can_capture) {
         ImGui::EndDisabled();
     }
     ImGui::Separator();
 
     std::lock_guard<std::mutex> lock(mutex_);
+
+    if (actions.fit_requested && !lanes_.empty()) {
+        fit_requested_ = true;
+    }
 
     if (lanes_.empty()) {
         const char* message = (selected_signal_count_ == 0)
@@ -96,7 +143,7 @@ bool WaveformView::draw(bool can_clear) {
             : "No waveform data.\nRun capture to display selected signals.";
         ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%s", message);
         ImGui::End();
-        return clear_requested;
+        return actions;
     }
 
     // ── Sweep controls ─────────────────────────────────────────────
@@ -113,7 +160,26 @@ bool WaveformView::draw(bool can_clear) {
     ImVec2 avail = ImGui::GetContentRegionAvail();
     if (avail.x < 50 || avail.y < 50) {
         ImGui::End();
-        return clear_requested;
+        return actions;
+    }
+
+    bool apply_fit = false;
+    double fit_min_x = earliest_time_;
+    double fit_max_x = latest_time_;
+    if (fit_requested_ && latest_time_ >= earliest_time_) {
+        apply_fit = true;
+        if (fit_max_x <= fit_min_x) {
+            fit_max_x = fit_min_x + 1.0;
+        }
+    }
+
+    bool apply_reset = false;
+    double reset_max_x = 1.0;
+    if (reset_view_requested_) {
+        apply_reset = true;
+        reset_max_x = auto_scroll_
+            ? (latest_time_ > window_us_ ? latest_time_ : window_us_)
+            : (latest_time_ > 1.0 ? latest_time_ : 1.0);
     }
 
     // One subplot per signal lane (stacked vertically)
@@ -130,10 +196,21 @@ bool WaveformView::draw(bool can_clear) {
             if (ImPlot::BeginPlot(plot_id, ImVec2(-1, 0),
                                    ImPlotFlags_NoLegend |
                                    ImPlotFlags_NoMouseText)) {
-                // Auto-scroll: always show [latest-window, latest]
-                if (auto_scroll_ && latest_time_ > 0.0) {
+                if (apply_fit) {
+                    ImPlot::SetupAxisLimits(ImAxis_X1, fit_min_x, fit_max_x,
+                                            ImPlotCond_Always);
+                } else if (apply_reset) {
+                    ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, reset_max_x,
+                                            ImPlotCond_Always);
+                } else if (auto_scroll_ && latest_time_ >= 0.0) {
+                    // Auto-scroll: clamp the visible range to start at 0 for
+                    // a new acquisition, then follow the latest data.
+                    const double min_x =
+                        latest_time_ > window_us_ ? latest_time_ - window_us_ : 0.0;
+                    const double max_x =
+                        latest_time_ > window_us_ ? latest_time_ : window_us_;
                     ImPlot::SetupAxisLimits(ImAxis_X1,
-                        latest_time_ - window_us_, latest_time_,
+                        min_x, max_x,
                         ImPlotCond_Always);
                 }
                 ImPlot::SetupAxisLimits(ImAxis_Y1, -0.2, 1.4,
@@ -171,8 +248,15 @@ bool WaveformView::draw(bool can_clear) {
         ImPlot::EndSubplots();
     }
 
+    if (apply_fit) {
+        fit_requested_ = false;
+    }
+    if (apply_reset) {
+        reset_view_requested_ = false;
+    }
+
     ImGui::End();
-    return clear_requested;
+    return actions;
 }
 
 } // namespace jtag::gui

@@ -43,7 +43,13 @@ private:
     };
 
     static std::vector<PinGroup> groups_;
+    static std::vector<std::string> selected_order_;
     static bool selection_changed_;
+
+    static PinEntry* findPin(const std::string& name);
+    static void addToSelectedOrder(const std::string& name);
+    static void removeFromSelectedOrder(const std::string& name);
+    static void setPinSelected(PinEntry& pin, bool selected);
 };
 
 } // namespace jtag::gui

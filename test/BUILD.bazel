@@ -35,3 +35,31 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "scanner_test",
+    srcs = ["scanner_test.cpp"],
+    deps = [
+        "//src/boundary_scan:scanner",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "pin_driver_test",
+    srcs = ["pin_driver_test.cpp"],
+    deps = [
+        "//src/boundary_scan:pin_driver",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "script_engine_test",
+    srcs = ["script_engine_test.cpp"],
+    deps = [
+        "//src/script:script_engine",
+        "@googletest//:gtest_main",
+    ],
+)
+

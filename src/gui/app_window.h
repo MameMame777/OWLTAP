@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -35,7 +36,10 @@ private:
     void buildDockspace();
     void buildMenuBar();
     void initializeDockLayout(unsigned int dockspace_id);
+    void drawPinControlPanel();
+    void drawScriptRunnerPanel();
     void setStatusMessage(const std::string& message);
+    bool refreshPinReadback(bool report_status);
 
     // Backend actions
     void onConnect();
@@ -45,11 +49,16 @@ private:
     void onStopCapture();
     void onSingleCapture();
     void onClearWaveforms();
+    void onFitWaveforms();
     void onExportVcd();
     void onExportCsv();
+    void onLoadScript();
+    void onSaveScript(bool save_as);
     void onLoadConfig();
     void onSaveConfig();
     void refreshFromCapture();
+    bool loadScriptFile(const std::string& path, std::string& error);
+    bool saveScriptFile(const std::string& path, std::string& error) const;
 
     // Portable file dialog helpers (Win32 on Windows)
     static std::string openFileDialog(const char* title, const char* filter);
@@ -75,6 +84,12 @@ private:
     bool capturing_ = false;
     int bsdl_device_index_ = -1;
     std::chrono::steady_clock::time_point last_refresh_{};
+    std::array<char, 8192> script_buffer_{};
+    std::string script_path_;
+    std::string script_output_;
+    jtag::ScanResult pin_readback_;
+    std::string pin_readback_error_;
+    bool extest_outputs_active_ = false;
 
     AppConfig config_;
 };

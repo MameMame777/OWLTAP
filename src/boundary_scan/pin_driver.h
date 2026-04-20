@@ -11,6 +11,11 @@
 
 namespace jtag {
 
+/// Returns false for devices whose boundary register covers a live PS/DDR/MIO
+/// subsystem that would be commandeered by EXTEST.
+bool deviceAllowsLiveExtest(const bsdl::BSDLDevice& device,
+                            std::string* reason = nullptr);
+
 /// Drives FPGA pins using EXTEST instruction and boundary scan register.
 /// WARNING: EXTEST overrides normal pin function. Use with caution.
 class PinDriver {
@@ -21,6 +26,12 @@ public:
 
     /// Check if driver is properly configured.
     bool isReady() const;
+
+    /// Whether EXTEST-based pin driving is allowed for the loaded device.
+    bool extestAllowed() const;
+
+    /// Human-readable reason why EXTEST driving is blocked.
+    std::string extestBlockedReason() const;
 
     /// Set a pin's output value.
     /// Does not take effect until applyOutputs() is called.
@@ -38,6 +49,13 @@ public:
     /// This loads the EXTEST instruction and shifts out the BSR data.
     /// @return true on success
     bool applyOutputs();
+
+    /// Capture the current device boundary state using SAMPLE and use it as
+    /// the staging baseline for subsequent EXTEST writes.
+    bool captureCurrentState();
+
+    /// Replace the internal staged BSR snapshot with a raw BSR image.
+    void loadSnapshot(const std::vector<uint8_t>& raw_bsr);
 
     /// Reset all outputs to safe values (from BSDL safe_value field).
     void resetToSafe();

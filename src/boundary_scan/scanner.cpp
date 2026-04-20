@@ -4,6 +4,35 @@
 
 namespace jtag {
 
+ScanResult decodeBoundaryScan(const bsdl::BSDLDevice& device,
+                              std::vector<uint8_t> raw_bsr) {
+    ScanResult result;
+    result.raw_bsr = std::move(raw_bsr);
+    if (result.raw_bsr.empty()) {
+        return result;
+    }
+
+    // First pass: INPUT/BIDIR/CLOCK cells — these capture the actual pad state.
+    for (const auto& cell : device.boundary_cells) {
+        if (!cell.hasPin()) continue;
+        if (!cell.isInput()) continue;
+        const bool bit_val = result.getBit(cell.position);
+        result.pin_states[cell.pin_name] = bit_val ? PinState::HIGH : PinState::LOW;
+    }
+
+    // Second pass: OUTPUT2/OUTPUT3 cells for pins that have no INPUT cell.
+    // (e.g. dedicated config pins that are output-only in the BSR)
+    for (const auto& cell : device.boundary_cells) {
+        if (!cell.hasPin()) continue;
+        if (!cell.isOutput()) continue;
+        if (result.pin_states.count(cell.pin_name) != 0) continue;
+        const bool bit_val = result.getBit(cell.position);
+        result.pin_states[cell.pin_name] = bit_val ? PinState::HIGH : PinState::LOW;
+    }
+
+    return result;
+}
+
 Scanner::Scanner(JtagChain& chain, int device_index)
     : chain_(chain), device_index_(device_index) {}
 
@@ -113,25 +142,7 @@ ScanResult Scanner::sample() {
         return result;
     }
 
-    // First pass: INPUT/BIDIR/CLOCK cells — these capture the actual pad state.
-    for (const auto& cell : dev->boundary_cells) {
-        if (!cell.hasPin()) continue;
-        if (!cell.isInput()) continue;
-        bool bit_val = result.getBit(cell.position);
-        result.pin_states[cell.pin_name] = bit_val ? PinState::HIGH : PinState::LOW;
-    }
-
-    // Second pass: OUTPUT2/OUTPUT3 cells for pins that have no INPUT cell.
-    // (e.g. dedicated config pins like DONE that are output-only in the BSR)
-    for (const auto& cell : dev->boundary_cells) {
-        if (!cell.hasPin()) continue;
-        if (!cell.isOutput()) continue;
-        if (result.pin_states.count(cell.pin_name)) continue; // already captured
-        bool bit_val = result.getBit(cell.position);
-        result.pin_states[cell.pin_name] = bit_val ? PinState::HIGH : PinState::LOW;
-    }
-
-    return result;
+    return decodeBoundaryScan(*dev, std::move(result.raw_bsr));
 }
 
 std::vector<std::string> Scanner::getObservablePins() const {
@@ -162,9 +173,12 @@ std::vector<std::string> Scanner::getDrivablePins() const {
     const auto* dev = bsdlDevice();
     if (!dev) return pins;
 
+    std::set<std::string> seen;
     for (const auto& cell : dev->boundary_cells) {
         if (cell.hasPin() && cell.isOutput()) {
-            pins.push_back(cell.pin_name);
+            if (seen.insert(cell.pin_name).second) {
+                pins.push_back(cell.pin_name);
+            }
         }
     }
     return pins;

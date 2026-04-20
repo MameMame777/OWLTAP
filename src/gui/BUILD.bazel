@@ -40,6 +40,7 @@ cc_library(
         "//src/ftdi:ftdi_device",
         "//src/jtag:jtag_chain",
         "//src/jtag:tap_controller",
+        "//src/script:script_engine",
         "//third_party/glfw",
         "//third_party/imgui",
         "//third_party/implot",

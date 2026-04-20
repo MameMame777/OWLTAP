@@ -12,8 +12,16 @@ namespace jtag::gui {
 class WaveformView {
 public:
     /// Draw the waveform panel (call each frame).
-    /// Returns true when the Clear button is pressed.
-    static bool draw(bool can_clear);
+    /// Returns which panel actions were requested.
+    struct DrawActions {
+        bool run_requested = false;
+        bool single_requested = false;
+        bool stop_requested = false;
+        bool clear_requested = false;
+        bool fit_requested = false;
+    };
+
+    static DrawActions draw(bool can_capture, bool can_stop);
 
     /// Set waveform data (thread-safe; called from main thread after copy).
     static void setData(const std::vector<std::string>& signals,
@@ -25,6 +33,12 @@ public:
     /// Set cursor position (sample index).
     static void setCursorPosition(int sample_index);
     static int cursorPosition();
+
+    /// Request a one-shot fit to the current buffered time range.
+    static void requestFit();
+
+    /// Reset the waveform viewport when the next acquisition data arrives.
+    static void requestResetView();
 
 private:
     struct SignalLane {
@@ -40,8 +54,11 @@ private:
     static double trigger_time_;
     static size_t selected_signal_count_;
     static double latest_time_;   // latest sample time (us), for auto-scroll
+    static double earliest_time_; // earliest sample time (us), for manual fit
     static bool auto_scroll_;     // follow latest data live
     static double window_us_;     // visible time window width (us)
+    static bool fit_requested_;
+    static bool reset_view_requested_;
 };
 
 } // namespace jtag::gui

@@ -1,0 +1,35 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+# Dear ImGui (docking branch) - MIT license
+# Core + GLFW/OpenGL3 backends
+
+cc_library(
+    name = "imgui",
+    srcs = [
+        "imgui-src/imgui.cpp",
+        "imgui-src/imgui_demo.cpp",
+        "imgui-src/imgui_draw.cpp",
+        "imgui-src/imgui_tables.cpp",
+        "imgui-src/imgui_widgets.cpp",
+        "imgui-src/imgui_impl_glfw.cpp",
+        "imgui-src/imgui_impl_opengl3.cpp",
+    ],
+    hdrs = [
+        "imgui-src/imconfig.h",
+        "imgui-src/imgui.h",
+        "imgui-src/imgui_internal.h",
+        "imgui-src/imgui_impl_glfw.h",
+        "imgui-src/imgui_impl_opengl3.h",
+        "imgui-src/imgui_impl_opengl3_loader.h",
+        "imgui-src/imstb_rectpack.h",
+        "imgui-src/imstb_textedit.h",
+        "imgui-src/imstb_truetype.h",
+    ],
+    copts = select({
+        "@platforms//os:windows": ["/utf-8"],
+        "//conditions:default": [],
+    }),
+    includes = ["imgui-src"],
+    visibility = ["//visibility:public"],
+    deps = ["//third_party/glfw"],
+)

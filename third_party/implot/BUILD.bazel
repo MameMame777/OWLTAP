@@ -1,0 +1,23 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+# ImPlot v0.16 - MIT license
+# Plotting library for Dear ImGui
+
+cc_library(
+    name = "implot",
+    srcs = [
+        "implot-src/implot.cpp",
+        "implot-src/implot_items.cpp",
+    ],
+    hdrs = [
+        "implot-src/implot.h",
+        "implot-src/implot_internal.h",
+    ],
+    copts = select({
+        "@platforms//os:windows": ["/utf-8"],
+        "//conditions:default": [],
+    }),
+    includes = ["implot-src"],
+    visibility = ["//visibility:public"],
+    deps = ["//third_party/imgui"],
+)

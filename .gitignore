@@ -1,0 +1,19 @@
+# Bazel outputs
+bazel-*
+
+# Local runtime/config state
+cfg.json
+imgui.ini
+*.env
+
+# Vendor/device description files (do not publish)
+*.bsdl
+*.bsd
+
+# Local upstream source archives; extracted vendor trees are tracked instead
+third_party/libusb/libusb-1.0.27-src.zip
+third_party/libftdi/libftdi1-1.5.tar.bz2
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

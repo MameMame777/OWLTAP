@@ -1,0 +1,19 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "ftdi_device",
+    srcs = ["ftdi_device.cpp"],
+    hdrs = ["ftdi_device.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":mpsse",
+        "//third_party/libftdi",
+    ],
+)
+
+cc_library(
+    name = "mpsse",
+    srcs = ["mpsse.cpp"],
+    hdrs = ["mpsse.h"],
+    visibility = ["//visibility:public"],
+)

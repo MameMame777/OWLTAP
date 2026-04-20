@@ -1,0 +1,45 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+# libftdi1 library
+#   Linux: links against system libftdi1-dev
+#   Windows: compiles from source (extracted from libftdi1-1.5.tar.bz2)
+
+cc_library(
+    name = "libftdi_from_source",
+    srcs = [
+        "libftdi-src/ftdi.c",
+        "libftdi-src/ftdi_stream.c",
+    ],
+    hdrs = [
+        "libftdi-src/ftdi.h",
+        "libftdi-src/ftdi_i.h",
+        "libftdi-src/ftdi_version_i.h",
+    ],
+    copts = [
+        "/Ithird_party/libftdi/libftdi-src",
+        "/Ithird_party/libusb/include",
+        "/utf-8",
+    ],
+    includes = ["libftdi-src"],
+    visibility = ["//visibility:private"],
+    deps = ["//third_party/libusb"],
+)
+
+cc_library(
+    name = "libftdi_system",
+    hdrs = glob(["include/**/*.h"]),
+    includes = ["include"],
+    linkopts = ["-lftdi1"],
+    visibility = ["//visibility:private"],
+    deps = ["//third_party/libusb"],
+)
+
+alias(
+    name = "libftdi",
+    actual = select({
+        "@platforms//os:linux": ":libftdi_system",
+        "@platforms//os:windows": ":libftdi_from_source",
+        "//conditions:default": ":libftdi_system",
+    }),
+    visibility = ["//visibility:public"],
+)

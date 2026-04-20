@@ -1,0 +1,69 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+# GLFW 3.4 - Window/input/OpenGL context library (Zlib license)
+# Built from source for Windows; system library on Linux.
+
+GLFW_COMMON_SRCS = [
+    "glfw-src/src/context.c",
+    "glfw-src/src/init.c",
+    "glfw-src/src/input.c",
+    "glfw-src/src/monitor.c",
+    "glfw-src/src/platform.c",
+    "glfw-src/src/vulkan.c",
+    "glfw-src/src/window.c",
+    "glfw-src/src/egl_context.c",
+    "glfw-src/src/osmesa_context.c",
+    "glfw-src/src/null_init.c",
+    "glfw-src/src/null_monitor.c",
+    "glfw-src/src/null_window.c",
+    "glfw-src/src/null_joystick.c",
+]
+
+GLFW_WIN32_SRCS = [
+    "glfw-src/src/win32_init.c",
+    "glfw-src/src/win32_joystick.c",
+    "glfw-src/src/win32_module.c",
+    "glfw-src/src/win32_monitor.c",
+    "glfw-src/src/win32_thread.c",
+    "glfw-src/src/win32_time.c",
+    "glfw-src/src/win32_window.c",
+    "glfw-src/src/wgl_context.c",
+]
+
+GLFW_HDRS = glob(["glfw-src/src/*.h"]) + glob(["glfw-src/include/GLFW/*.h"])
+
+cc_library(
+    name = "glfw_from_source",
+    srcs = GLFW_COMMON_SRCS + GLFW_WIN32_SRCS,
+    hdrs = GLFW_HDRS,
+    copts = [
+        "/D_GLFW_WIN32",
+        "/utf-8",
+    ],
+    includes = ["glfw-src/include"],
+    linkopts = [
+        "gdi32.lib",
+        "shell32.lib",
+        "user32.lib",
+        "opengl32.lib",
+    ],
+    visibility = ["//visibility:private"],
+)
+
+cc_library(
+    name = "glfw_system",
+    hdrs = glob(["glfw-src/include/GLFW/*.h"]),
+    includes = ["glfw-src/include"],
+    linkopts = ["-lglfw", "-lGL"],
+    visibility = ["//visibility:private"],
+)
+
+alias(
+    name = "glfw",
+    actual = select({
+        "@platforms//os:linux": ":glfw_system",
+        "@platforms//os:windows": ":glfw_from_source",
+        "//conditions:default": ":glfw_system",
+    }),
+    visibility = ["//visibility:public"],
+)

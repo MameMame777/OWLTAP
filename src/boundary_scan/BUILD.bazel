@@ -1,0 +1,24 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "scanner",
+    srcs = ["scanner.cpp"],
+    hdrs = ["scanner.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/bsdl:bsdl_model",
+        "//src/jtag:jtag_chain",
+    ],
+)
+
+cc_library(
+    name = "pin_driver",
+    srcs = ["pin_driver.cpp"],
+    hdrs = ["pin_driver.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":scanner",
+        "//src/bsdl:bsdl_model",
+        "//src/jtag:jtag_chain",
+    ],
+)

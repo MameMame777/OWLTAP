@@ -1,0 +1,26 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "bsdl_model",
+    srcs = ["bsdl_model.cpp"],
+    hdrs = ["bsdl_model.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bsdl_lexer",
+    srcs = ["bsdl_lexer.cpp"],
+    hdrs = ["bsdl_lexer.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bsdl_parser",
+    srcs = ["bsdl_parser.cpp"],
+    hdrs = ["bsdl_parser.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":bsdl_lexer",
+        ":bsdl_model",
+    ],
+)

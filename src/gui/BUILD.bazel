@@ -1,0 +1,56 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "app_config",
+    srcs = ["app_config.cpp"],
+    hdrs = ["app_config.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "gui",
+    srcs = [
+        "app_window.cpp",
+        "debug_log_panel.cpp",
+        "device_dialog.cpp",
+        "hex_panel.cpp",
+        "signal_panel.cpp",
+        "trigger_dialog.cpp",
+        "vcd_export.cpp",
+        "waveform_view.cpp",
+    ],
+    hdrs = [
+        "app_window.h",
+        "debug_log_panel.h",
+        "device_dialog.h",
+        "hex_panel.h",
+        "signal_panel.h",
+        "trigger_dialog.h",
+        "vcd_export.h",
+        "waveform_view.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":app_config",
+        "//src/boundary_scan:pin_driver",
+        "//src/boundary_scan:scanner",
+        "//src/bsdl:bsdl_model",
+        "//src/capture:capture_engine",
+        "//src/capture:trigger",
+        "//src/ftdi:ftdi_device",
+        "//src/jtag:jtag_chain",
+        "//src/jtag:tap_controller",
+        "//third_party/glfw",
+        "//third_party/imgui",
+        "//third_party/implot",
+    ] + select({
+        "@platforms//os:windows": [],
+        "//conditions:default": [],
+    }),
+    linkopts = select({
+        "@platforms//os:windows": [
+            "-DEFAULTLIB:comdlg32.lib",
+        ],
+        "//conditions:default": [],
+    }),
+)

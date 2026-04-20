@@ -1,0 +1,13 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+cc_binary(
+    name = "jtag_diag",
+    srcs = ["jtag_diag.cpp"],
+    deps = [
+        "//src/boundary_scan:scanner",
+        "//src/ftdi:ftdi_device",
+        "//src/gui:app_config",
+        "//src/jtag:jtag_chain",
+        "//src/jtag:tap_controller",
+    ],
+)

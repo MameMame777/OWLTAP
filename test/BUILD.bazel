@@ -1,0 +1,37 @@
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+cc_test(
+    name = "tap_controller_test",
+    srcs = ["tap_controller_test.cpp"],
+    deps = [
+        "//src/jtag:tap_controller",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "mpsse_test",
+    srcs = ["mpsse_test.cpp"],
+    deps = [
+        "//src/ftdi:mpsse",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "bsdl_parser_test",
+    srcs = ["bsdl_parser_test.cpp"],
+    deps = [
+        "//src/bsdl:bsdl_parser",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "trigger_test",
+    srcs = ["trigger_test.cpp"],
+    deps = [
+        "//src/capture:trigger",
+        "@googletest//:gtest_main",
+    ],
+)

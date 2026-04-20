@@ -1,0 +1,22 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "capture_engine",
+    srcs = ["capture_engine.cpp"],
+    hdrs = ["capture_engine.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":trigger",
+        "//src/boundary_scan:scanner",
+    ],
+)
+
+cc_library(
+    name = "trigger",
+    srcs = ["trigger.cpp"],
+    hdrs = ["trigger.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/boundary_scan:scanner",
+    ],
+)

@@ -1,0 +1,70 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+# libusb-1.0
+#   Linux: uses system library (apt install libusb-1.0-0-dev)
+#   Windows: builds from source (v1.0.27)
+
+_LIBUSB_SRC = "libusb-src/libusb-1.0.27/libusb/"
+
+# ---------- Common (platform-independent) sources ----------
+_COMMON_SRCS = [
+    _LIBUSB_SRC + "core.c",
+    _LIBUSB_SRC + "descriptor.c",
+    _LIBUSB_SRC + "hotplug.c",
+    _LIBUSB_SRC + "io.c",
+    _LIBUSB_SRC + "strerror.c",
+    _LIBUSB_SRC + "sync.c",
+]
+
+# ---------- Windows-specific sources ----------
+_WINDOWS_SRCS = [
+    _LIBUSB_SRC + "os/events_windows.c",
+    _LIBUSB_SRC + "os/threads_windows.c",
+    _LIBUSB_SRC + "os/windows_common.c",
+    _LIBUSB_SRC + "os/windows_usbdk.c",
+    _LIBUSB_SRC + "os/windows_winusb.c",
+]
+
+# ---------- Build from source (Windows) ----------
+cc_library(
+    name = "libusb_from_source",
+    srcs = _COMMON_SRCS + _WINDOWS_SRCS + glob([
+        _LIBUSB_SRC + "*.h",
+        _LIBUSB_SRC + "os/*.h",
+    ]),
+    hdrs = ["include/libusb.h"],
+    copts = [
+        "/I$(GENDIR)/third_party/libusb/libusb-src/libusb-1.0.27/msvc",
+        "/Ithird_party/libusb/libusb-src/libusb-1.0.27/msvc",
+        "/Ithird_party/libusb/libusb-src/libusb-1.0.27/libusb",
+        "/Ithird_party/libusb/libusb-src/libusb-1.0.27/libusb/os",
+        "/DPLATFORM_WINDOWS=1",
+        "/utf-8",
+    ],
+    includes = ["include"],
+    linkopts = [
+        "-DEFAULTLIB:advapi32.lib",
+        "-DEFAULTLIB:setupapi.lib",
+        "-DEFAULTLIB:ole32.lib",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# ---------- System library wrapper (Linux) ----------
+cc_library(
+    name = "libusb_system",
+    hdrs = ["include/libusb.h"],
+    includes = ["include"],
+    linkopts = ["-lusb-1.0"],
+    visibility = ["//visibility:public"],
+)
+
+# ---------- Platform alias ----------
+alias(
+    name = "libusb",
+    actual = select({
+        "@platforms//os:windows": ":libusb_from_source",
+        "//conditions:default": ":libusb_system",
+    }),
+    visibility = ["//visibility:public"],
+)

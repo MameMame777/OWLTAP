@@ -1,0 +1,24 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "tap_controller",
+    srcs = ["tap_controller.cpp"],
+    hdrs = ["tap_controller.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/ftdi:ftdi_device",
+        "//src/ftdi:mpsse",
+    ],
+)
+
+cc_library(
+    name = "jtag_chain",
+    srcs = ["jtag_chain.cpp"],
+    hdrs = ["jtag_chain.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":tap_controller",
+        "//src/bsdl:bsdl_model",
+        "//src/bsdl:bsdl_parser",
+    ],
+)

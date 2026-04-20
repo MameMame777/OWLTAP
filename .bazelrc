@@ -1,0 +1,23 @@
+# Common C++ settings
+common --enable_bzlmod
+
+# Bazel 9.x compatibility: autoload removed native rules from external repos
+build --incompatible_autoload_externally=+cc_library,+cc_test,+cc_binary,+cc_import
+
+# Platform-specific C++ standard flags
+build:linux --cxxopt=-std=c++17
+build:linux --host_cxxopt=-std=c++17
+build:macos --cxxopt=-std=c++17
+build:macos --host_cxxopt=-std=c++17
+build:windows --cxxopt=/std:c++17
+build:windows --host_cxxopt=/std:c++17
+build:windows --cxxopt=/utf-8
+build:windows --host_cxxopt=/utf-8
+
+# Debug
+build:debug -c dbg
+build:debug --cxxopt=-O0
+
+# Release
+build:release -c opt
+build:release --cxxopt=-O2

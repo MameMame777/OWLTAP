@@ -63,6 +63,15 @@ public:
     /// @return true on success
     bool writeBSR(int device_index, const uint8_t* bsr_data, int bsr_bits);
 
+    /// Read a raw Data Register from a specific device (BSDL not required).
+    /// Assumes the appropriate instruction is already loaded via selectInstruction().
+    /// Accounts for 1-bit BYPASS registers of other devices in the chain.
+    /// @param device_index  Target device index
+    /// @param dr_bits       Number of bits in the target device's DR
+    /// @param tdo_data      Output: captured DR data (LSB first)
+    /// @return true on success
+    bool readDataDR(int device_index, int dr_bits, std::vector<uint8_t>& tdo_data);
+
     /// Get last error message.
     const std::string& lastError() const { return last_error_; }
 

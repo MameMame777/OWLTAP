@@ -14,6 +14,8 @@
 #include <commdlg.h>
 #endif
 
+#include "src/icon_rgba_48.h"
+
 #include <algorithm>
 #include <array>
 #include <cfloat>
@@ -29,6 +31,7 @@
 #include "device_dialog.h"
 #include "hex_panel.h"
 #include "signal_panel.h"
+#include "src/config/pl_config.h"
 #include "src/script/script_engine.h"
 #include "trigger_dialog.h"
 #include "vcd_export.h"
@@ -269,6 +272,14 @@ AppWindow::AppWindow() {
         return;
     }
 
+    // Set window / taskbar icon from embedded RGBA data.
+    GLFWimage icon_image;
+    icon_image.width  = kIconWidth;
+    icon_image.height = kIconHeight;
+    // GLFW requires a non-const pointer; the pixels are not modified.
+    icon_image.pixels = const_cast<unsigned char*>(kIconRgba);
+    glfwSetWindowIcon(window_, 1, &icon_image);
+
     glfwMakeContextCurrent(window_);
     glfwSwapInterval(1);
 
@@ -378,6 +389,9 @@ void AppWindow::run() {
             ImGui::End();
         }
 
+        // PL programming progress modal
+        drawProgramPlModal();
+
         // Periodic refresh from capture engine (~20 Hz)
         if (capturing_) {
             auto now = std::chrono::steady_clock::now();
@@ -450,6 +464,9 @@ void AppWindow::onConnect() {
 }
 
 void AppWindow::onDisconnect() {
+    // Wait for any PL programming thread before destroying backend objects
+    if (program_pl_thread_.joinable()) program_pl_thread_.join();
+
     const bool had_backend_state = capturing_ || connected_ ||
         capture_engine_ != nullptr || pin_driver_ != nullptr ||
         scanner_ != nullptr || chain_ != nullptr || tap_ != nullptr ||
@@ -1263,7 +1280,8 @@ void AppWindow::buildMenuBar() {
             if (ImGui::MenuItem("Connect...", nullptr, false, !connected_)) {
                 show_device_dialog_ = true;
             }
-            if (ImGui::MenuItem("Disconnect", nullptr, false, connected_)) {
+        if (ImGui::MenuItem("Disconnect", nullptr, false,
+                             connected_ && !program_pl_running_.load())) {
                 onDisconnect();
             }
             ImGui::EndMenu();
@@ -1295,6 +1313,14 @@ void AppWindow::buildMenuBar() {
             }
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Tools")) {
+            const bool can_program = connected_ && !capturing_ &&
+                                     !program_pl_running_.load();
+            if (ImGui::MenuItem("Program  Bitstream...", nullptr, false, can_program)) {
+                onProgramPl();
+            }
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Help")) {
             if (ImGui::MenuItem("About")) {
                 show_about_ = true;
@@ -1302,6 +1328,119 @@ void AppWindow::buildMenuBar() {
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
+    }
+}
+
+// ── PL Programming ──────────────────────────────────────────────────
+
+void AppWindow::onProgramPl() {
+    if (!connected_ || !chain_) return;
+    if (program_pl_running_.load()) return;
+
+    std::string path = openFileDialog(
+        "Program  Bitstream",
+        "Bitstream Files (*.bit;*.bin)\0*.bit;*.bin\0All Files (*.*)\0*.*\0");
+    if (path.empty()) return;
+
+    // Join any previously finished thread
+    if (program_pl_thread_.joinable()) program_pl_thread_.join();
+
+    program_pl_path_ = path;
+    program_pl_bytes_.store(0);
+    program_pl_total_.store(0);
+    program_pl_success_.store(false);
+    {
+        std::lock_guard<std::mutex> lk(program_pl_mutex_);
+        program_pl_error_.clear();
+    }
+    program_pl_running_.store(true);
+    program_pl_popup_requested_ = true;
+
+    setStatusMessage("Programming PL: " + path);
+
+    program_pl_thread_ = std::thread([this, path]() {
+        // Device 0 = PL TAP (TDO-closest in Zynq JTAG chain, UG470 ordering)
+        jtag::PlConfig pl(*chain_, 0);
+        bool ok = pl.program(path, [this](size_t sent, size_t total) {
+            program_pl_bytes_.store(sent);
+            program_pl_total_.store(total);
+        });
+        std::string err;
+        if (!ok) err = pl.lastError();
+        {
+            std::lock_guard<std::mutex> lk(program_pl_mutex_);
+            program_pl_error_ = err;
+        }
+        program_pl_success_.store(ok);
+        program_pl_running_.store(false);
+    });
+}
+
+void AppWindow::drawProgramPlModal() {
+    if (program_pl_popup_requested_) {
+        ImGui::OpenPopup("Programming PL");
+        program_pl_popup_requested_ = false;
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(460.0f, 0.0f), ImGuiCond_Always);
+
+    if (ImGui::BeginPopupModal("Programming PL", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        // Show short filename
+        const std::string& path = program_pl_path_;
+        const size_t slash = path.find_last_of("/\\");
+        const std::string fname = (slash != std::string::npos)
+                                      ? path.substr(slash + 1) : path;
+        ImGui::TextUnformatted(fname.c_str());
+        ImGui::Separator();
+
+        const bool running = program_pl_running_.load();
+        if (running) {
+            const size_t sent  = program_pl_bytes_.load();
+            const size_t total = program_pl_total_.load();
+            const float frac   = (total > 0)
+                ? static_cast<float>(sent) / static_cast<float>(total) : 0.0f;
+            char overlay[64];
+            if (total > 0) {
+                snprintf(overlay, sizeof(overlay), "%zu / %zu KB",
+                         sent / 1024, total / 1024);
+            } else {
+                snprintf(overlay, sizeof(overlay), "Loading...");
+            }
+            ImGui::ProgressBar(frac, ImVec2(-1.0f, 22.0f), overlay);
+            ImGui::TextDisabled("Programming in progress — please wait...");
+        } else {
+            const bool success = program_pl_success_.load();
+            if (success) {
+                ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f),
+                                   "SUCCESS: DONE asserted. PL is running.");
+            } else {
+                ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "FAILED");
+                std::string err;
+                {
+                    std::lock_guard<std::mutex> lk(program_pl_mutex_);
+                    err = program_pl_error_;
+                }
+                if (!err.empty()) {
+                    ImGui::Spacing();
+                    ImGui::TextWrapped("%s", err.c_str());
+                }
+            }
+            ImGui::Separator();
+            if (ImGui::Button("Close", ImVec2(120.0f, 0.0f))) {
+                if (program_pl_thread_.joinable()) program_pl_thread_.join();
+                if (success) {
+                    setStatusMessage("PL programmed successfully.");
+                } else {
+                    std::lock_guard<std::mutex> lk(program_pl_mutex_);
+                    setStatusMessage("PL programming failed: " + program_pl_error_);
+                }
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndPopup();
     }
 }
 

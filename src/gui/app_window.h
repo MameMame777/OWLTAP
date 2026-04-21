@@ -1,9 +1,12 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 
 #include "app_config.h"
 #include "src/boundary_scan/pin_driver.h"
@@ -60,6 +63,10 @@ private:
     bool loadScriptFile(const std::string& path, std::string& error);
     bool saveScriptFile(const std::string& path, std::string& error) const;
 
+    // PL programming (background thread)
+    void onProgramPl();
+    void drawProgramPlModal();
+
     // Portable file dialog helpers (Win32 on Windows)
     static std::string openFileDialog(const char* title, const char* filter);
     static std::string saveFileDialog(const char* title, const char* filter);
@@ -90,6 +97,17 @@ private:
     jtag::ScanResult pin_readback_;
     std::string pin_readback_error_;
     bool extest_outputs_active_ = false;
+
+    // PL programming state
+    bool program_pl_popup_requested_ = false;
+    std::atomic<bool> program_pl_running_{false};
+    std::atomic<size_t> program_pl_bytes_{0};
+    std::atomic<size_t> program_pl_total_{0};
+    std::atomic<bool> program_pl_success_{false};
+    std::string program_pl_path_;
+    std::string program_pl_error_;   // written by thread; read only after running_ == false
+    std::mutex program_pl_mutex_;
+    std::thread program_pl_thread_;
 
     AppConfig config_;
 };

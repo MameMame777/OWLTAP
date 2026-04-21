@@ -16,6 +16,39 @@ namespace jtag {
 bool deviceAllowsLiveExtest(const bsdl::BSDLDevice& device,
                             std::string* reason = nullptr);
 
+/// Set a pin's output value in a BSR staging buffer.
+/// Sets both the output cell bit and the control cell enable bit.
+/// Returns false if the pin is not drivable; fills *error when non-null.
+bool stagePinOutput(std::vector<uint8_t>& bsr_data,
+                    const bsdl::BSDLDevice& device,
+                    const std::string& pin_name,
+                    int value,
+                    std::string* error = nullptr);
+
+/// Set a pin to high impedance in a BSR staging buffer.
+/// Returns false if the pin doesn't support tri-state; fills *error when non-null.
+bool stagePinHighZ(std::vector<uint8_t>& bsr_data,
+                   const bsdl::BSDLDevice& device,
+                   const std::string& pin_name,
+                   std::string* error = nullptr);
+
+/// Read the staged output value for a pin from a BSR buffer.
+/// Returns 0 (LOW), 1 (HIGH), or -1 (high-Z / pin not present).
+int getStagedPinValue(const std::vector<uint8_t>& bsr_data,
+                      const bsdl::BSDLDevice& device,
+                      const std::string& pin_name);
+
+/// Copy raw_bsr into bsr_data, sized and masked to match device.boundary_length.
+/// Excess high bits in the last byte are zeroed. Short input is zero-padded.
+void applyBsrSnapshot(std::vector<uint8_t>& bsr_data,
+                      const bsdl::BSDLDevice& device,
+                      const std::vector<uint8_t>& raw_bsr);
+
+/// Fill bsr_data from BSDL safe_value fields.
+/// Cells with safe_value==1 set their bit; all others clear it.
+void initBsrFromSafeValues(std::vector<uint8_t>& bsr_data,
+                            const bsdl::BSDLDevice& device);
+
 /// Drives FPGA pins using EXTEST instruction and boundary scan register.
 /// WARNING: EXTEST overrides normal pin function. Use with caution.
 class PinDriver {
@@ -73,8 +106,6 @@ private:
     std::vector<uint8_t> bsr_data_;  // BSR bit buffer
     std::string last_error_;
 
-    void setBit(int position, bool value);
-    bool getBit(int position) const;
     void initBsrFromSafe();
 };
 

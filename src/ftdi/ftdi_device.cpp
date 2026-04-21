@@ -502,13 +502,30 @@ bool FtdiDevice::transfer(const MpsseCommandBuffer& cmd_buf,
 
 #ifdef _WIN32
     FT_HANDLE h = static_cast<FT_HANDLE>(d2xx_handle_);
-    DWORD written = 0;
-    FT_STATUS st = g_d2xx.FT_Write(
-        h, const_cast<uint8_t*>(data.data()),
-        static_cast<DWORD>(data.size()), &written);
-    if (st != FT_OK || written != static_cast<DWORD>(data.size())) {
-        last_error_ = "FT_Write failed: " + statusStr(st);
-        return false;
+
+    // D2XX FT_Write can silently truncate writes larger than the internal
+    // USB buffer (~64 KB).  Loop in 65536-byte chunks to handle large
+    // transfers (e.g. 4 MB FPGA bitstreams) reliably.
+    {
+        const uint8_t* wp = data.data();
+        DWORD remaining = static_cast<DWORD>(data.size());
+        while (remaining > 0) {
+            DWORD chunk = (remaining > 65536u) ? 65536u : remaining;
+            DWORD written = 0;
+            FT_STATUS st = g_d2xx.FT_Write(
+                h, const_cast<uint8_t*>(wp), chunk, &written);
+            if (st != FT_OK || written != chunk) {
+                char buf[128];
+                snprintf(buf, sizeof(buf),
+                         "FT_Write failed: wrote %lu of %lu bytes (status %lu)",
+                         (unsigned long)written, (unsigned long)chunk,
+                         (unsigned long)st);
+                last_error_ = buf;
+                return false;
+            }
+            wp        += written;
+            remaining -= written;
+        }
     }
 
     size_t expected = cmd_buf.expectedReadBytes();

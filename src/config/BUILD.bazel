@@ -1,0 +1,11 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "pl_config",
+    srcs = ["pl_config.cpp"],
+    hdrs = ["pl_config.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/jtag:jtag_chain",
+    ],
+)

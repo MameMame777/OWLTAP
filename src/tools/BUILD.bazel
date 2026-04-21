@@ -11,3 +11,15 @@ cc_binary(
         "//src/jtag:tap_controller",
     ],
 )
+
+cc_binary(
+    name = "pl_program",
+    srcs = ["pl_program.cpp"],
+    deps = [
+        "//src/config:pl_config",
+        "//src/ftdi:ftdi_device",
+        "//src/gui:app_config",
+        "//src/jtag:jtag_chain",
+        "//src/jtag:tap_controller",
+    ],
+)

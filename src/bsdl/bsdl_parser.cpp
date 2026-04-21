@@ -7,6 +7,10 @@
 
 namespace jtag::bsdl {
 
+// Upper bound on BSR bit count accepted from untrusted BSDL files.
+// Real FPGAs top out well below this (Zynq UltraScale+ ~4096 bits).
+static constexpr int kMaxBsrBits = 65536;
+
 void BSDLParser::setError(const std::string& msg, int line) {
     has_error_ = true;
     if (line > 0) {
@@ -279,8 +283,12 @@ void BSDLParser::parseInstructionOpcode(BSDLLexer& lexer, BSDLDevice& dev) {
 void BSDLParser::parseBoundaryLength(BSDLLexer& lexer, BSDLDevice& dev) {
     Token tok = lexer.nextToken();
     if (tok.type == TokenType::INTEGER) {
-        dev.boundary_length = std::stoi(tok.value);
-        dev.boundary_cells.resize(dev.boundary_length);
+        int len = 0;
+        try { len = std::stoi(tok.value); } catch (...) {}
+        if (len > 0 && len <= kMaxBsrBits) {
+            dev.boundary_length = len;
+            dev.boundary_cells.resize(static_cast<size_t>(len));
+        }
     }
     skipToSemicolon(lexer);
 }
@@ -384,11 +392,12 @@ void BSDLParser::parseBoundaryRegister(BSDLLexer& lexer, BSDLDevice& dev) {
 
         cell.disable_result = parseDisableResult(disable_result_str);
 
-        // Store in vector by position
+        // Store in vector by position (guard against malicious BSDL)
         if (cell_pos >= 0 && cell_pos < static_cast<int>(dev.boundary_cells.size())) {
             dev.boundary_cells[cell_pos] = cell;
-        } else if (cell_pos >= static_cast<int>(dev.boundary_cells.size())) {
-            dev.boundary_cells.resize(cell_pos + 1);
+        } else if (cell_pos >= static_cast<int>(dev.boundary_cells.size()) &&
+                   cell_pos < kMaxBsrBits) {
+            dev.boundary_cells.resize(static_cast<size_t>(cell_pos) + 1);
             dev.boundary_cells[cell_pos] = cell;
             dev.boundary_length = static_cast<int>(dev.boundary_cells.size());
         }

@@ -262,4 +262,41 @@ bool JtagChain::writeBSR(int device_index, const uint8_t* bsr_data,
     return tap_.shiftDR(full_dr.data(), total_dr);
 }
 
+bool JtagChain::readDataDR(int device_index, int dr_bits,
+                            std::vector<uint8_t>& tdo_data) {
+    if (device_index < 0 || device_index >= static_cast<int>(devices_.size())) {
+        last_error_ = "Invalid device index";
+        return false;
+    }
+    if (dr_bits <= 0) {
+        last_error_ = "dr_bits must be positive";
+        return false;
+    }
+
+    // Total DR: target device's DR + 1-bit BYPASS per other device
+    int total_dr = dr_bits;
+    for (int i = 0; i < static_cast<int>(devices_.size()); i++) {
+        if (i != device_index) total_dr += 1;
+    }
+
+    std::vector<uint8_t> full_tdo;
+    std::vector<uint8_t> zeros((total_dr + 7) / 8, 0);
+    if (!tap_.shiftDR(zeros.data(), full_tdo, total_dr)) {
+        last_error_ = tap_.lastError();
+        return false;
+    }
+
+    // Extract target device bits, skipping BYPASS bits of lower-index devices
+    int skip_before = 0;
+    for (int i = 0; i < device_index; i++) skip_before += 1;
+
+    tdo_data.assign((dr_bits + 7) / 8, 0);
+    for (int b = 0; b < dr_bits; b++) {
+        int src = skip_before + b;
+        if ((full_tdo[src / 8] >> (src % 8)) & 1)
+            tdo_data[b / 8] |= static_cast<uint8_t>(1 << (b % 8));
+    }
+    return true;
+}
+
 } // namespace jtag

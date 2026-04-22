@@ -2,7 +2,7 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
 cc_library(
     name = "icon_rgba",
-    hdrs = ["icon_rgba_48.h"],
+    hdrs = ["icon_rgba_64.h"],
     visibility = ["//visibility:public"],
 )
 

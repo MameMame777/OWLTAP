@@ -15,6 +15,7 @@
 #include "src/ftdi/ftdi_device.h"
 #include "src/jtag/jtag_chain.h"
 #include "src/jtag/tap_controller.h"
+#include "src/script/test_suite.h"
 
 struct GLFWwindow;
 
@@ -37,10 +38,13 @@ private:
     void beginFrame();
     void endFrame();
     void buildDockspace();
+    static void applyTheme();
     void buildMenuBar();
     void initializeDockLayout(unsigned int dockspace_id);
     void drawPinControlPanel();
     void drawScriptRunnerPanel();
+    void drawInterconnectPanel();
+    void drawHelpWindow();
     void setStatusMessage(const std::string& message);
     bool refreshPinReadback(bool report_status);
 
@@ -63,6 +67,9 @@ private:
     void refreshFromCapture();
     bool loadScriptFile(const std::string& path, std::string& error);
     bool saveScriptFile(const std::string& path, std::string& error) const;
+    void onLoadSuite();
+    void onRunSuite();
+    void onExportSuiteReport();
 
     // PL programming (background thread)
     void onProgramPl();
@@ -77,6 +84,8 @@ private:
     bool show_device_dialog_ = false;
     bool show_trigger_dialog_ = false;
     bool show_about_ = false;
+    bool show_help_ = false;
+    int  help_topic_ = 0;
     std::string status_text_ = "Disconnected";
     bool dock_layout_initialized_ = false;
 
@@ -98,6 +107,18 @@ private:
     jtag::ScanResult pin_readback_;
     std::string pin_readback_error_;
     bool extest_outputs_active_ = false;
+
+    // Test suite state
+    std::vector<std::string> suite_paths_;
+    std::string suite_path_;
+    jtag::script::TestSuiteResult suite_result_;
+    bool suite_has_result_ = false;
+    std::string suite_output_;
+    static constexpr size_t kSuiteOutputMax = 65536;
+
+    // Interconnect device lists (populated on connect)
+    std::vector<std::unique_ptr<jtag::Scanner>> chain_scanners_;
+    std::vector<std::unique_ptr<jtag::PinDriver>> chain_drivers_;
 
     // PL programming state
     bool program_pl_popup_requested_ = false;

@@ -9,3 +9,13 @@ cc_library(
         "//src/boundary_scan:scanner",
     ],
 )
+
+cc_library(
+    name = "test_suite",
+    srcs = ["test_suite.cpp"],
+    hdrs = ["test_suite.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":script_engine",
+    ],
+)

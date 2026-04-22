@@ -156,6 +156,8 @@ ScriptResult ScriptEngine::run(const std::string& script_text,
     std::string line;
     std::string output;
     int line_number = 0;
+    int total_expects = 0;
+    int failed_expects = 0;
 
     while (std::getline(stream, line)) {
         line_number++;
@@ -285,7 +287,9 @@ ScriptResult ScriptEngine::run(const std::string& script_text,
             }
 
             const jtag::PinState actual = result.getPin(pin_name);
+            total_expects++;
             if (actual != expected) {
+                failed_expects++;
                 return fail(std::move(output), line_number,
                             pin_name + " expected " + pinStateName(expected) +
                                 " but observed " + pinStateName(actual));
@@ -340,7 +344,7 @@ ScriptResult ScriptEngine::run(const std::string& script_text,
     }
 
     appendOutput(output, "script completed successfully");
-    return {true, 0, std::move(output)};
+    return {true, 0, std::move(output), total_expects, failed_expects};
 }
 
 } // namespace jtag::script

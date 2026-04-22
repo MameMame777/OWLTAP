@@ -97,7 +97,7 @@ def _update(k32, handle, type_id, name_id, data: bytes):
 
 def embed_icon(exe_path, png_path):
     img = Image.open(png_path).convert("RGBA")
-    sizes = [16, 32, 48]
+    sizes = [16, 32, 48, 64, 256]
 
     dibs = [_make_dib(img.resize((s, s), Image.LANCZOS)) for s in sizes]
 
@@ -119,7 +119,8 @@ def embed_icon(exe_path, png_path):
         # Write RT_GROUP_ICON entry (ID=1 → Explorer application icon)
         grp = struct.pack("<HHH", 0, 1, len(dibs))
         for idx, (dib, size) in enumerate(zip(dibs, sizes), start=1):
-            grp += struct.pack("<BBBBHHIH", size, size, 0, 0, 1, 32, len(dib), idx)
+            bw = 0 if size >= 256 else size  # Windows BYTE field: 0 means 256
+            grp += struct.pack("<BBBBHHIH", bw, bw, 0, 0, 1, 32, len(dib), idx)
         _update(k32, handle, RT_GROUP_ICON, 1, grp)
 
     except Exception:

@@ -24,6 +24,8 @@ struct ScriptResult {
     bool success = false;
     int failed_line = 0;
     std::string output;
+    int total_expects = 0;
+    int failed_expects = 0;
 };
 
 class ScriptEngine {

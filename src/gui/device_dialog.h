@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "src/ftdi/ftdi_device.h"
+
 namespace jtag::gui {
 
 /// Device connection configuration
@@ -44,6 +46,7 @@ private:
     struct DeviceEntry {
         std::string label;
         std::string serial;
+        jtag::FtdiDeviceInfo info;  // full device info for detail display
     };
     static std::vector<DeviceEntry> devices_;
 };

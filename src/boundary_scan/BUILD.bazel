@@ -22,3 +22,14 @@ cc_library(
         "//src/jtag:jtag_chain",
     ],
 )
+
+cc_library(
+    name = "interconnect_test",
+    srcs = ["interconnect_test.cpp"],
+    hdrs = ["interconnect_test.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":pin_driver",
+        ":scanner",
+    ],
+)

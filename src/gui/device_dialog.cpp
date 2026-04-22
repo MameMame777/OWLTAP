@@ -44,6 +44,7 @@ void DeviceDialog::refreshDevices() {
                  dev.product_id);
         e.label = buf;
         e.serial = dev.serial;
+        e.info = dev;
         devices_.push_back(std::move(e));
     }
 }
@@ -75,6 +76,28 @@ void DeviceDialog::draw(bool* p_open) {
             }
             if (ImGui::Button("Refresh")) {
                 refreshDevices();
+            }
+
+            // Device info panel — shown when a real device is selected.
+            if (device_idx_ >= 0 &&
+                device_idx_ < static_cast<int>(devices_.size()) &&
+                !devices_[device_idx_].info.description.empty()) {
+                const auto& info = devices_[device_idx_].info;
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::TextDisabled("Device Info");
+                ImGui::Columns(2, "devinfo", false);
+                ImGui::SetColumnWidth(0, 120.0f);
+                ImGui::TextDisabled("Manufacturer"); ImGui::NextColumn();
+                ImGui::Text("%s", info.manufacturer.c_str()); ImGui::NextColumn();
+                ImGui::TextDisabled("Product");      ImGui::NextColumn();
+                ImGui::Text("%s", info.description.c_str()); ImGui::NextColumn();
+                ImGui::TextDisabled("Serial");       ImGui::NextColumn();
+                ImGui::Text("%s", info.serial.c_str()); ImGui::NextColumn();
+                ImGui::TextDisabled("VID:PID");      ImGui::NextColumn();
+                ImGui::Text("%04X:%04X", info.vendor_id, info.product_id);
+                ImGui::Columns(1);
+                ImGui::Separator();
             }
         }
 

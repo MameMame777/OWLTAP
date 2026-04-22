@@ -14,7 +14,7 @@
 #include <commdlg.h>
 #endif
 
-#include "src/icon_rgba_48.h"
+#include "src/icon_rgba_64.h"
 
 #include <algorithm>
 #include <array>
@@ -30,10 +30,13 @@
 #include "debug_log_panel.h"
 #include "device_dialog.h"
 #include "hex_panel.h"
+#include "interconnect_panel.h"
 #include "protocol_panel.h"
 #include "signal_panel.h"
+#include "src/boundary_scan/interconnect_test.h"
 #include "src/config/pl_config.h"
 #include "src/script/script_engine.h"
+#include "src/script/test_suite.h"
 #include "src/xdc/xdc_parser.h"
 #include "trigger_dialog.h"
 #include "vcd_export.h"
@@ -297,7 +300,7 @@ AppWindow::AppWindow() {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    ImGui::StyleColorsDark();
+    applyTheme();
 
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330");
@@ -309,6 +312,102 @@ AppWindow::AppWindow() {
                   "# expect LED0 1\n");
 
     setStatusMessage(status_text_);
+}
+
+// ── Theme ───────────────────────────────────────────────────────────
+
+void AppWindow::applyTheme() {
+    ImGui::StyleColorsDark();
+
+    ImGuiStyle& s = ImGui::GetStyle();
+
+    // --- Shape ---
+    s.WindowRounding    = 8.0f;
+    s.ChildRounding     = 6.0f;
+    s.FrameRounding     = 5.0f;
+    s.PopupRounding     = 6.0f;
+    s.ScrollbarRounding = 4.0f;
+    s.GrabRounding      = 4.0f;
+    s.TabRounding       = 5.0f;
+
+    // --- Spacing ---
+    s.WindowPadding     = ImVec2(12.0f, 10.0f);
+    s.FramePadding      = ImVec2(8.0f, 4.0f);
+    s.ItemSpacing       = ImVec2(8.0f, 5.0f);
+    s.ItemInnerSpacing  = ImVec2(6.0f, 4.0f);
+    s.ScrollbarSize     = 12.0f;
+    s.GrabMinSize       = 8.0f;
+    s.WindowBorderSize  = 1.0f;
+    s.FrameBorderSize   = 0.0f;
+
+    // --- Colors (overriding StyleColorsDark base) ---
+    ImVec4* c = s.Colors;
+
+    // Backgrounds
+    c[ImGuiCol_WindowBg]          = ImVec4(0.11f, 0.11f, 0.14f, 1.00f);
+    c[ImGuiCol_ChildBg]           = ImVec4(0.09f, 0.09f, 0.12f, 1.00f);
+    c[ImGuiCol_PopupBg]           = ImVec4(0.14f, 0.14f, 0.18f, 1.00f);
+    c[ImGuiCol_MenuBarBg]         = ImVec4(0.09f, 0.09f, 0.12f, 1.00f);
+    c[ImGuiCol_ScrollbarBg]       = ImVec4(0.09f, 0.09f, 0.12f, 1.00f);
+
+    // Borders & separators
+    c[ImGuiCol_Border]            = ImVec4(0.28f, 0.28f, 0.36f, 0.60f);
+    c[ImGuiCol_BorderShadow]      = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    c[ImGuiCol_Separator]         = ImVec4(0.28f, 0.28f, 0.36f, 0.80f);
+    c[ImGuiCol_SeparatorHovered]  = ImVec4(0.40f, 0.70f, 1.00f, 0.60f);
+    c[ImGuiCol_SeparatorActive]   = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
+
+    // Frames
+    c[ImGuiCol_FrameBg]           = ImVec4(0.18f, 0.18f, 0.24f, 1.00f);
+    c[ImGuiCol_FrameBgHovered]    = ImVec4(0.24f, 0.24f, 0.32f, 1.00f);
+    c[ImGuiCol_FrameBgActive]     = ImVec4(0.28f, 0.28f, 0.38f, 1.00f);
+
+    // Title bars
+    c[ImGuiCol_TitleBg]           = ImVec4(0.09f, 0.09f, 0.12f, 1.00f);
+    c[ImGuiCol_TitleBgActive]     = ImVec4(0.16f, 0.29f, 0.48f, 1.00f);
+    c[ImGuiCol_TitleBgCollapsed]  = ImVec4(0.09f, 0.09f, 0.12f, 0.80f);
+
+    // Buttons
+    c[ImGuiCol_Button]            = ImVec4(0.18f, 0.36f, 0.60f, 1.00f);
+    c[ImGuiCol_ButtonHovered]     = ImVec4(0.26f, 0.48f, 0.75f, 1.00f);
+    c[ImGuiCol_ButtonActive]      = ImVec4(0.14f, 0.28f, 0.50f, 1.00f);
+
+    // Headers (CollapsingHeader, Selectable, etc.)
+    c[ImGuiCol_Header]            = ImVec4(0.18f, 0.36f, 0.60f, 0.50f);
+    c[ImGuiCol_HeaderHovered]     = ImVec4(0.26f, 0.48f, 0.75f, 0.60f);
+    c[ImGuiCol_HeaderActive]      = ImVec4(0.26f, 0.48f, 0.75f, 1.00f);
+
+    // Accent elements
+    c[ImGuiCol_CheckMark]         = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
+    c[ImGuiCol_SliderGrab]        = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
+    c[ImGuiCol_SliderGrabActive]  = ImVec4(0.55f, 0.80f, 1.00f, 1.00f);
+    c[ImGuiCol_ScrollbarGrab]     = ImVec4(0.25f, 0.42f, 0.62f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.34f, 0.55f, 0.78f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
+    c[ImGuiCol_ResizeGrip]        = ImVec4(0.40f, 0.70f, 1.00f, 0.30f);
+    c[ImGuiCol_ResizeGripHovered] = ImVec4(0.40f, 0.70f, 1.00f, 0.60f);
+    c[ImGuiCol_ResizeGripActive]  = ImVec4(0.40f, 0.70f, 1.00f, 0.90f);
+
+    // Tabs
+    c[ImGuiCol_Tab]               = ImVec4(0.13f, 0.25f, 0.42f, 1.00f);
+    c[ImGuiCol_TabHovered]        = ImVec4(0.40f, 0.70f, 1.00f, 0.80f);
+    c[ImGuiCol_TabActive]         = ImVec4(0.20f, 0.42f, 0.68f, 1.00f);
+    c[ImGuiCol_TabUnfocused]      = ImVec4(0.09f, 0.09f, 0.12f, 1.00f);
+    c[ImGuiCol_TabUnfocusedActive]= ImVec4(0.14f, 0.26f, 0.42f, 1.00f);
+
+    // Docking
+    c[ImGuiCol_DockingPreview]    = ImVec4(0.40f, 0.70f, 1.00f, 0.70f);
+    c[ImGuiCol_DockingEmptyBg]    = ImVec4(0.08f, 0.08f, 0.10f, 1.00f);
+
+    // Text selection / navigation
+    c[ImGuiCol_TextSelectedBg]    = ImVec4(0.18f, 0.36f, 0.60f, 0.50f);
+    c[ImGuiCol_NavHighlight]      = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
+
+    // Plot colors (match waveform signal line color)
+    c[ImGuiCol_PlotLines]         = ImVec4(0.53f, 0.70f, 0.98f, 1.00f);
+    c[ImGuiCol_PlotLinesHovered]  = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
+    c[ImGuiCol_PlotHistogram]     = ImVec4(0.53f, 0.70f, 0.98f, 1.00f);
+    c[ImGuiCol_PlotHistogramHovered] = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
 }
 
 AppWindow::~AppWindow() {
@@ -380,6 +479,7 @@ void AppWindow::run() {
 
         drawPinControlPanel();
         drawScriptRunnerPanel();
+        drawInterconnectPanel();
         DebugLogPanel::draw(status_text_);
 
         // Device dialog
@@ -406,6 +506,10 @@ void AppWindow::run() {
                 ImGui::Text("Supports BSDL files for pin mapping.");
             }
             ImGui::End();
+        }
+        // Help
+        if (show_help_) {
+            drawHelpWindow();
         }
 
         // PL programming progress modal
@@ -497,6 +601,8 @@ void AppWindow::onDisconnect() {
     capture_engine_.reset();
     pin_driver_.reset();
     scanner_.reset();
+    chain_scanners_.clear();
+    chain_drivers_.clear();
     chain_.reset();
     tap_.reset();
     if (ftdi_ && ftdi_->isOpen()) {
@@ -567,6 +673,23 @@ void AppWindow::onOpenBsdl() {
     // Create capture engine
     capture_engine_ = std::make_unique<jtag::CaptureEngine>(*scanner_);
     extest_outputs_active_ = false;
+
+    // Build per-device scanner/driver lists for interconnect testing
+    // (one entry per device; entries for devices without BSDL are nullptr)
+    chain_scanners_.clear();
+    chain_drivers_.clear();
+    const auto& devs = chain_->devices();
+    for (size_t i = 0; i < devs.size(); i++) {
+        if (devs[i].bsdl) {
+            chain_scanners_.push_back(
+                std::make_unique<jtag::Scanner>(*chain_, static_cast<int>(i)));
+            chain_drivers_.push_back(
+                std::make_unique<jtag::PinDriver>(*chain_, static_cast<int>(i)));
+        } else {
+            chain_scanners_.push_back(nullptr);
+            chain_drivers_.push_back(nullptr);
+        }
+    }
 
     // Bind trigger dialog
     TriggerDialog::bind(scanner_.get(), &capture_engine_->trigger());
@@ -905,9 +1028,77 @@ void AppWindow::drawScriptRunnerPanel() {
 
     ImGui::Separator();
     ImGui::TextDisabled("Output");
-    ImGui::BeginChild("script_output", ImVec2(0.0f, 0.0f), true);
+    ImGui::BeginChild("script_output", ImVec2(0.0f, 180.0f), true);
     ImGui::TextUnformatted(script_output_.c_str());
     ImGui::EndChild();
+
+    // ── Suite runner ───────────────────────────────────────────────
+    ImGui::Separator();
+    ImGui::Text("Test Suite");
+    if (ImGui::Button("Load Suite...")) {
+        onLoadSuite();
+    }
+    ImGui::SameLine();
+    const bool can_run_suite =
+        !suite_paths_.empty() && can_run_script;
+    if (!can_run_suite) ImGui::BeginDisabled();
+    if (ImGui::Button("Run Suite")) {
+        onRunSuite();
+    }
+    if (!can_run_suite) ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (!suite_has_result_) ImGui::BeginDisabled();
+    if (ImGui::Button("Export Report...")) {
+        onExportSuiteReport();
+    }
+    if (!suite_has_result_) ImGui::EndDisabled();
+
+    if (!suite_path_.empty()) {
+        ImGui::TextDisabled("%s  (%d tests)",
+                            suite_path_.c_str(),
+                            static_cast<int>(suite_paths_.size()));
+    }
+
+    if (suite_has_result_) {
+        ImGui::Text("PASS %d / %d",
+                    suite_result_.pass_count,
+                    static_cast<int>(suite_result_.cases.size()));
+
+        if (ImGui::BeginTable("suite_results", 3,
+                              ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_ScrollY,
+                              ImVec2(0.0f, 110.0f))) {
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableSetupColumn("Script");
+            ImGui::TableSetupColumn("Status");
+            ImGui::TableSetupColumn("Expects");
+            ImGui::TableHeadersRow();
+
+            for (const auto& tc : suite_result_.cases) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(tc.name.c_str());
+                ImGui::TableSetColumnIndex(1);
+                if (tc.success) {
+                    ImGui::PushStyleColor(ImGuiCol_Text,
+                                         ImVec4(0.3f, 1.0f, 0.3f, 1.0f));
+                    ImGui::TextUnformatted("PASS");
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Text,
+                                         ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "FAIL L%d", tc.failed_line);
+                    ImGui::TextUnformatted(buf);
+                }
+                ImGui::PopStyleColor();
+                ImGui::TableSetColumnIndex(2);
+                ImGui::Text("%d/%d",
+                            tc.total_expects - tc.failed_expects,
+                            tc.total_expects);
+            }
+            ImGui::EndTable();
+        }
+    }
 
     ImGui::End();
 }
@@ -1211,6 +1402,71 @@ void AppWindow::onSaveConfig() {
     }
 }
 
+// ── Test Suite ─────────────────────────────────────────────────────
+
+void AppWindow::onLoadSuite() {
+    const std::string path = openFileDialog(
+        "Load Test Suite",
+        "Suite Files (*.suite)\0*.suite\0All Files (*.*)\0*.*\0");
+    if (path.empty()) return;
+
+    std::string error;
+    const auto paths = jtag::script::TestSuiteRunner::parseSuiteFile(path, error);
+    if (!error.empty()) {
+        setStatusMessage("Suite load error: " + error);
+        return;
+    }
+    suite_paths_ = paths;
+    suite_path_  = path;
+    suite_has_result_ = false;
+    suite_output_.clear();
+    setStatusMessage("Suite loaded: " + std::to_string(paths.size()) +
+                     " test(s) from " + path);
+}
+
+void AppWindow::onRunSuite() {
+    if (suite_paths_.empty() || !scanner_ || !pin_driver_ || capturing_) return;
+
+    GuiScriptHost host(*scanner_, *pin_driver_, extest_outputs_active_);
+    suite_result_ = jtag::script::TestSuiteRunner::run(suite_paths_, host);
+    suite_has_result_ = true;
+
+    const std::string report =
+        jtag::script::TestSuiteRunner::formatReport(suite_result_);
+    suite_output_ = report;
+    if (suite_output_.size() > kSuiteOutputMax) {
+        suite_output_.resize(kSuiteOutputMax);
+    }
+
+    setStatusMessage("Suite complete: " +
+                     std::to_string(suite_result_.pass_count) + " passed, " +
+                     std::to_string(suite_result_.fail_count) + " failed.");
+}
+
+void AppWindow::onExportSuiteReport() {
+    if (!suite_has_result_) return;
+    const std::string path = saveFileDialog(
+        "Export Suite Report",
+        "Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0");
+    if (path.empty()) return;
+    std::ofstream f(path);
+    if (f.is_open()) {
+        f << jtag::script::TestSuiteRunner::formatReport(suite_result_);
+        setStatusMessage("Report saved: " + path);
+    } else {
+        setStatusMessage("Failed to write report: " + path);
+    }
+}
+
+void AppWindow::drawInterconnectPanel() {
+    // Build raw pointer lists from chain_scanners_ / chain_drivers_
+    std::vector<jtag::Scanner*> scanners;
+    std::vector<jtag::PinDriver*> drivers;
+    for (auto& s : chain_scanners_) scanners.push_back(s.get());
+    for (auto& d : chain_drivers_)  drivers.push_back(d.get());
+    InterconnectPanel::draw(scanners, drivers, connected_);
+}
+
 void AppWindow::initializeDockLayout(unsigned int dockspace_id) {
     if (dock_layout_initialized_) return;
     dock_layout_initialized_ = true;
@@ -1311,6 +1567,193 @@ void AppWindow::buildDockspace() {
     ImGui::End();
 }
 
+// ── Help window ─────────────────────────────────────────────────────
+
+void AppWindow::drawHelpWindow() {
+    static const char* kTopics[] = {
+        "Quick Start",
+        "Waveform Capture",
+        "Script Runner",
+        "Test Suite",
+        "Interconnect Test",
+        "PL Programming",
+    };
+    static const char* kContent[] = {
+        // 0: Quick Start
+        "QUICK START\n"
+        "-----------\n"
+        "1. Connect\n"
+        "   Device > Connect... -> select FTDI device and interface, then OK.\n"
+        "\n"
+        "2. Load BSDL\n"
+        "   File > Open BSDL File... -> select the .bsd / .bsdl file that\n"
+        "   matches the FPGA on your board.  The Signals panel is populated\n"
+        "   from the BSDL pin list.\n"
+        "\n"
+        "3. Select signals\n"
+        "   In the Signals panel, check the pins you want to monitor.\n"
+        "\n"
+        "4. Capture\n"
+        "   Capture > Run (F5) to start continuous sampling.\n"
+        "   The waveform panel updates ~20 times per second.\n"
+        "   Capture > Stop (F6) to halt.  Capture > Single (F7) for one shot.\n"
+        "\n"
+        "5. Drive outputs (EXTEST)\n"
+        "   Use the Pin Control panel to set pin directions and values,\n"
+        "   then click Apply to write them via EXTEST instruction.\n",
+
+        // 1: Waveform Capture
+        "WAVEFORM CAPTURE\n"
+        "----------------\n"
+        "Capture uses the JTAG SAMPLE/PRELOAD instruction to read all\n"
+        "boundary-scan cells from the FPGA without disturbing I/O.\n"
+        "\n"
+        "Keyboard shortcuts:\n"
+        "  F5  Run (continuous)\n"
+        "  F6  Stop\n"
+        "  F7  Single shot\n"
+        "  F8  Open Trigger Setup dialog\n"
+        "\n"
+        "Trigger Setup (Capture > Trigger Setup... or F8):\n"
+        "  Choose a pin, a polarity (rising / falling / high / low), and\n"
+        "  an optional pre-trigger depth.  The engine captures until the\n"
+        "  trigger condition fires, then stops.\n"
+        "\n"
+        "Waveform view:\n"
+        "  Scroll wheel       Zoom time axis\n"
+        "  Click + drag       Pan\n"
+        "  Right-click plot   Context menu (fit, reset zoom)\n"
+        "\n"
+        "Export:\n"
+        "  File > Export VCD...  Value Change Dump (for GTKWave etc.)\n"
+        "  File > Export CSV...  Comma-separated values\n",
+
+        // 2: Script Runner
+        "SCRIPT RUNNER\n"
+        "-------------\n"
+        "The Script Runner panel lets you write and run small automation\n"
+        "scripts against the live JTAG chain.\n"
+        "\n"
+        "Available commands:\n"
+        "  sample           Issue SAMPLE/PRELOAD; read all boundary cells.\n"
+        "  read <pin>       Print the current sampled state of <pin>.\n"
+        "  set <pin> <0|1>  Stage a drive value (requires apply to take effect).\n"
+        "  highz <pin>      Stage the pin as high-impedance.\n"
+        "  apply            Push staged values via EXTEST instruction.\n"
+        "  expect <pin> <0|1>  Assert the sampled value; fail if mismatch.\n"
+        "  sleep <ms>       Wait the specified number of milliseconds.\n"
+        "  reset_safe       Navigate the TAP to Test-Logic-Reset safely.\n"
+        "\n"
+        "Tip: use 'sample' before 'read' or 'expect' to refresh the scan.\n"
+        "\n"
+        "File operations:\n"
+        "  File > Load Script...   Open a .jscript / .txt file.\n"
+        "  File > Save Script      Save to current path.\n"
+        "  File > Save Script As...  Save to a new path.\n",
+
+        // 3: Test Suite
+        "TEST SUITE\n"
+        "----------\n"
+        "A test suite is a plain-text .suite file that lists script files\n"
+        "to run in sequence.  Use it for board-level regression testing.\n"
+        "\n"
+        ".suite file format:\n"
+        "  # Lines beginning with # are comments and are ignored.\n"
+        "  # Each non-empty line is a path to a script file.\n"
+        "  # Relative paths are resolved from the .suite file's directory.\n"
+        "  tests/power_on_check.jscript\n"
+        "  tests/io_loopback.jscript\n"
+        "\n"
+        "Workflow:\n"
+        "  1. Test > Load Suite (.suite)...  Open the .suite file.\n"
+        "  2. Test > Run Suite               Run all listed scripts.\n"
+        "  3. Review the results table in the Script Runner panel:\n"
+        "       - PASS (green)  All expect commands succeeded.\n"
+        "       - FAIL (red)    At least one expect failed; line number shown.\n"
+        "       - Expects column shows passed/total count.\n"
+        "  4. Test > Export Suite Report...  Save a text summary.\n",
+
+        // 4: Interconnect Test
+        "INTERCONNECT TEST\n"
+        "-----------------\n"
+        "Tests board-level net connectivity between FPGA pins using EXTEST.\n"
+        "Each net is driven 0 then 1; all receivers are sampled each time.\n"
+        "\n"
+        ".ict file format (whitespace-separated columns, # comments):\n"
+        "  net_name  driver_dev:DRIVER_PIN  recv_dev:PIN_A  recv_dev:PIN_B ...\n"
+        "  Example:\n"
+        "    CLK_NET  0:GCLK_P   1:CLK_IN_P   1:CLK_IN_N\n"
+        "  dev index = position in JTAG chain (0 = TDO-closest).\n"
+        "  Pin names must match the BSDL cell names for that device.\n"
+        "  Minimum: driver + at least one receiver.\n"
+        "\n"
+        "Workflow:\n"
+        "  1. Connect and load BSDL files for all devices in the chain.\n"
+        "  2. Test > Interconnect Test...  to open the panel.\n"
+        "  3. Click 'Load .ict...'  to open the netlist file.\n"
+        "  4. Review the net preview table (Net / Driver / Receivers).\n"
+        "  5. Click 'Run Test' to execute.\n"
+        "     Results table shows per-net PASS (green) / FAIL (red);\n"
+        "     expand a row to see the drive-0 and drive-1 observed values.\n"
+        "  6. Click 'Export Report...' to save a text report.\n",
+
+        // 5: PL Programming
+        "PL PROGRAMMING\n"
+        "--------------\n"
+        "Programs a Xilinx FPGA PL (Programmable Logic) via JTAG.\n"
+        "Supported file formats: .bit (Xilinx bitstream), .bin (raw binary).\n"
+        "\n"
+        "Requirements:\n"
+        "  - Device must be connected.\n"
+        "  - Capture must not be running.\n"
+        "  - Device 0 in the JTAG chain is assumed to be the PL TAP\n"
+        "    (TDO-closest, following Xilinx UG470 chain ordering).\n"
+        "\n"
+        "Workflow:\n"
+        "  Tools > Program Bitstream...\n"
+        "  -> Select the .bit or .bin file in the file dialog.\n"
+        "  -> A progress dialog shows KB sent / total KB.\n"
+        "  -> On success, 'DONE asserted' confirms the PL has started.\n"
+        "  -> On failure, the error message is shown in the dialog and\n"
+        "     in the status bar.\n"
+        "\n"
+        "Note: partial reconfiguration bitstreams are not yet supported.\n",
+    };
+
+    static_assert(sizeof(kTopics) / sizeof(kTopics[0]) ==
+                  sizeof(kContent) / sizeof(kContent[0]),
+                  "topic/content count mismatch");
+    constexpr int kNumTopics = static_cast<int>(sizeof(kTopics) / sizeof(kTopics[0]));
+
+    ImGui::SetNextWindowSize(ImVec2(780.0f, 480.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Help", &show_help_)) {
+        ImGui::End();
+        return;
+    }
+
+    // Left pane: topic list
+    ImGui::BeginChild("help_topics", ImVec2(170.0f, 0.0f), true);
+    for (int i = 0; i < kNumTopics; ++i) {
+        if (ImGui::Selectable(kTopics[i], help_topic_ == i)) {
+            help_topic_ = i;
+        }
+    }
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+
+    // Right pane: content
+    ImGui::BeginChild("help_content", ImVec2(0.0f, 0.0f), true);
+    if (help_topic_ >= 0 && help_topic_ < kNumTopics) {
+        ImGui::TextUnformatted(kContent[help_topic_]);
+    }
+    ImGui::EndChild();
+
+    ImGui::End();
+}
+
+// ── Menu bar ─────────────────────────────────────────────────────────
+
 void AppWindow::buildMenuBar() {
     if (ImGui::BeginMenuBar()) {
         if (ImGui::BeginMenu("File")) {
@@ -1390,6 +1833,26 @@ void AppWindow::buildMenuBar() {
             }
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Test")) {
+            if (ImGui::MenuItem("Load Suite (.suite)...")) {
+                onLoadSuite();
+            }
+            if (ImGui::MenuItem("Run Suite", nullptr, false,
+                                !suite_paths_.empty() && scanner_ &&
+                                    pin_driver_ && !capturing_)) {
+                onRunSuite();
+            }
+            if (ImGui::MenuItem("Export Suite Report...", nullptr, false,
+                                suite_has_result_)) {
+                onExportSuiteReport();
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Interconnect Test...", nullptr,
+                                InterconnectPanel::isVisible())) {
+                InterconnectPanel::setVisible(!InterconnectPanel::isVisible());
+            }
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Tools")) {
             const bool can_program = connected_ && !capturing_ &&
                                      !program_pl_running_.load();
@@ -1404,6 +1867,13 @@ void AppWindow::buildMenuBar() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
+            if (ImGui::MenuItem("Quick Start",        nullptr, false)) { show_help_ = true; help_topic_ = 0; }
+            if (ImGui::MenuItem("Waveform Capture",   nullptr, false)) { show_help_ = true; help_topic_ = 1; }
+            if (ImGui::MenuItem("Script Runner",      nullptr, false)) { show_help_ = true; help_topic_ = 2; }
+            if (ImGui::MenuItem("Test Suite",         nullptr, false)) { show_help_ = true; help_topic_ = 3; }
+            if (ImGui::MenuItem("Interconnect Test",  nullptr, false)) { show_help_ = true; help_topic_ = 4; }
+            if (ImGui::MenuItem("PL Programming",     nullptr, false)) { show_help_ = true; help_topic_ = 5; }
+            ImGui::Separator();
             if (ImGui::MenuItem("About")) {
                 show_about_ = true;
             }

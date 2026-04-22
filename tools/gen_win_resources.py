@@ -81,7 +81,7 @@ def _pad4(data):
 
 def generate(src_png, out_res):
     img = Image.open(src_png).convert("RGBA")
-    sizes = [16, 32, 48]  # standard sizes; 256-px PNG is added separately
+    sizes = [16, 32, 48, 64, 256]  # covers normal and high-DPI displays
 
     # Build DIB payloads for each size
     icons = []
@@ -105,9 +105,10 @@ def generate(src_png, out_res):
     grp = struct.pack("<HHH", 0, 1, len(icons))
     for idx, dib in enumerate(icons, start=1):
         w = sizes[idx - 1]
+        bw = 0 if w >= 256 else w  # Windows BYTE field: 0 means 256
         # GRPICONDIRENTRY: Width, Height, ColorCount, Reserved,
         #                  Planes, BitCount, BytesInRes, nId
-        grp += struct.pack("<BBBBHHIH", w, w, 0, 0, 1, 32, len(dib), idx)
+        grp += struct.pack("<BBBBHHIH", bw, bw, 0, 0, 1, 32, len(dib), idx)
     buf += _res_header(len(grp), RT_GROUP_ICON, 1)
     buf += _pad4(grp)
 

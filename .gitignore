@@ -17,3 +17,5 @@ third_party/libftdi/libftdi1-1.5.tar.bz2
 # OS/editor noise
 .DS_Store
 Thumbs.db
+build.log
+build_run.log

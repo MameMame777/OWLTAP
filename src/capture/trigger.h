@@ -25,8 +25,8 @@ enum class TriggerType {
 /// Operating mode for trigger
 enum class TriggerMode {
     FREE_RUN,  // No trigger; continuous capture
-    SINGLE,    // Capture once after trigger, then stop
-    NORMAL,    // Re-arm after each trigger
+    SINGLE,    // Immediate snapshot: one frame, stop (ignores trigger conditions)
+    NORMAL,    // Wait for trigger condition, fill buffer, re-arm
 };
 
 /// A single trigger condition

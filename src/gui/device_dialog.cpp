@@ -88,8 +88,10 @@ void DeviceDialog::draw(bool* p_open) {
                 ImGui::TextDisabled("Device Info");
                 ImGui::Columns(2, "devinfo", false);
                 ImGui::SetColumnWidth(0, 120.0f);
-                ImGui::TextDisabled("Manufacturer"); ImGui::NextColumn();
-                ImGui::Text("%s", info.manufacturer.c_str()); ImGui::NextColumn();
+                if (!info.manufacturer.empty()) {
+                    ImGui::TextDisabled("Manufacturer"); ImGui::NextColumn();
+                    ImGui::Text("%s", info.manufacturer.c_str()); ImGui::NextColumn();
+                }
                 ImGui::TextDisabled("Product");      ImGui::NextColumn();
                 ImGui::Text("%s", info.description.c_str()); ImGui::NextColumn();
                 ImGui::TextDisabled("Serial");       ImGui::NextColumn();

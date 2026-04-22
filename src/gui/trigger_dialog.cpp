@@ -24,7 +24,9 @@ void TriggerDialog::bind(jtag::Scanner* scanner,
     if (trigger_) {
         conditions_ = trigger_->conditions();
         pretrigger_ = trigger_->preTriggerRatio();
-        mode_idx_ = static_cast<int>(trigger_->mode());
+        // Map TriggerMode to dialog index (Single not shown; defaults to Free Run)
+        auto m = trigger_->mode();
+        mode_idx_ = (m == jtag::TriggerMode::NORMAL) ? 1 : 0;
     }
     if (scanner_) {
         pin_names_ = scanner_->getObservablePins();
@@ -47,8 +49,8 @@ void TriggerDialog::draw(bool* p_open) {
         // Trigger mode
         if (ImGui::CollapsingHeader("Trigger Mode",
                                      ImGuiTreeNodeFlags_DefaultOpen)) {
-            const char* modes[] = {"Free Run", "Single", "Normal"};
-            ImGui::Combo("Mode", &mode_idx_, modes, 3);
+            const char* modes[] = {"Free Run", "Normal"};
+            ImGui::Combo("Mode", &mode_idx_, modes, 2);
             ImGui::SliderFloat("Pre-trigger ratio", &pretrigger_, 0.0f, 1.0f,
                                "%.1f");
         }
@@ -129,7 +131,9 @@ void TriggerDialog::draw(bool* p_open) {
         ImGui::Separator();
 
         if (ImGui::Button("OK", ImVec2(120, 0))) {
-            trigger_->setMode(static_cast<jtag::TriggerMode>(mode_idx_));
+            // Map dialog index back to TriggerMode (0=Free Run, 1=Normal)
+            trigger_->setMode(mode_idx_ == 1 ? jtag::TriggerMode::NORMAL
+                                              : jtag::TriggerMode::FREE_RUN);
             trigger_->setPreTriggerRatio(pretrigger_);
             trigger_->setConditions(conditions_);
             *p_open = false;

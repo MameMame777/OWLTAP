@@ -21,7 +21,8 @@ typedef ULONG  FT_STATUS;
 #define FT_BITMODE_MPSSE        0x02
 #define FT_PURGE_RX             1UL
 #define FT_PURGE_TX             2UL
-#define FT_OPEN_BY_DESCRIPTION  2UL
+#define FT_OPEN_BY_DESCRIPTION   2UL
+#define FT_FLAGS_OPENED          1UL
 
 typedef struct {
     ULONG     Flags;
@@ -197,6 +198,9 @@ std::vector<FtdiDeviceInfo> FtdiDevice::enumerate(
         info.product_id  = static_cast<uint16_t>(nodes[i].ID & 0xFFFF);
         info.description = nodes[i].Description;
         info.serial      = nodes[i].SerialNumber;
+        // Note: D2XX API does not expose manufacturer string without
+        // opening the device; manufacturer is left empty on Windows.
+
         result.push_back(std::move(info));
     }
 

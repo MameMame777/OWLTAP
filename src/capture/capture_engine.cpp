@@ -49,7 +49,11 @@ bool CaptureEngine::start() {
 
     stop_requested_.store(false);
 
-    if (trigger_.mode() == TriggerMode::FREE_RUN) {
+    // SINGLE: immediate snapshot, bypass trigger conditions entirely.
+    // FREE_RUN: continuous capture without trigger.
+    // NORMAL: wait for trigger condition, fill buffer, re-arm.
+    if (trigger_.mode() == TriggerMode::FREE_RUN ||
+        trigger_.mode() == TriggerMode::SINGLE) {
         state_.store(CaptureState::RUNNING);
     } else {
         state_.store(CaptureState::WAITING_TRIGGER);
@@ -186,6 +190,13 @@ void CaptureEngine::captureLoop() {
         sample_count++;
         prev_result = result;
         has_prev = true;
+
+        // SINGLE mode: stop immediately after one frame (snapshot).
+        if (trigger_.mode() == TriggerMode::SINGLE &&
+            current_state == CaptureState::RUNNING) {
+            state_.store(CaptureState::COMPLETE);
+            break;
+        }
 
         // Invoke callback
         if (callback_) {

@@ -492,6 +492,11 @@ void AppWindow::run() {
         // Trigger dialog
         if (show_trigger_dialog_) {
             TriggerDialog::draw(&show_trigger_dialog_);
+            // Sync run_mode_ when dialog closes (OK pressed)
+            if (!show_trigger_dialog_ && capture_engine_) {
+                auto m = capture_engine_->trigger().mode();
+                if (m != jtag::TriggerMode::SINGLE) run_mode_ = m;
+            }
         }
         // About
         if (show_about_) {
@@ -1105,6 +1110,9 @@ void AppWindow::drawScriptRunnerPanel() {
 
 void AppWindow::onStartCapture() {
     if (!capture_engine_) return;
+    if (capture_engine_->state() != jtag::CaptureState::STOPPED)
+        capture_engine_->stop();
+    capture_engine_->trigger().setMode(run_mode_);
     if (capture_engine_->start()) {
         capturing_ = true;
         extest_outputs_active_ = false;
@@ -1130,6 +1138,8 @@ void AppWindow::onStopCapture() {
 
 void AppWindow::onSingleCapture() {
     if (!capture_engine_) return;
+    if (capture_engine_->state() != jtag::CaptureState::STOPPED)
+        capture_engine_->stop();
     capture_engine_->trigger().setMode(jtag::TriggerMode::SINGLE);
     if (capture_engine_->start()) {
         capturing_ = true;
@@ -1176,15 +1186,18 @@ void AppWindow::refreshFromCapture() {
 
     // Check capture state
     auto state = capture_engine_->state();
-    if (state == jtag::CaptureState::COMPLETE ||
-        state == jtag::CaptureState::STOPPED) {
-        if (capturing_) {
-            capturing_ = false;
-            char buf[128];
-            snprintf(buf, sizeof(buf), "Capture complete. %zu samples. %.1f Hz.",
-                     samples.size(), capture_engine_->effectiveSampleRate());
-            setStatusMessage(buf);
-        }
+    // SINGLE mode completes after one frame (stays COMPLETE until stopped).
+    // NORMAL/FREE_RUN re-arms automatically; only stop when truly STOPPED.
+    bool is_done = (state == jtag::CaptureState::STOPPED) ||
+                   (state == jtag::CaptureState::COMPLETE &&
+                    capture_engine_->trigger().mode() == jtag::TriggerMode::SINGLE);
+    if (is_done && capturing_) {
+        capture_engine_->stop();  // transition COMPLETE → STOPPED (no-op if already STOPPED)
+        capturing_ = false;
+        char buf[128];
+        snprintf(buf, sizeof(buf), "Capture complete. %zu samples. %.1f Hz.",
+                 samples.size(), capture_engine_->effectiveSampleRate());
+        setStatusMessage(buf);
     }
 }
 

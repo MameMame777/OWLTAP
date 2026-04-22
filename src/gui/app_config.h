@@ -6,6 +6,21 @@
 
 namespace jtag::gui {
 
+/// Display format for multi-bit bus values.
+enum class BusFormat {
+    HEX = 0,
+    DEC = 1,
+    BIN = 2,
+};
+
+/// Persistent definition of a multi-bit bus (group of signals).
+/// signals[0] = MSB, signals.back() = LSB.
+struct BusDefinition {
+    std::string name;
+    std::vector<std::string> signals;  ///< MSB first
+    BusFormat format = BusFormat::HEX;
+};
+
 /// Persistent application settings saved to/loaded from cfg.json.
 struct AppConfig {
     // Device connection
@@ -21,6 +36,12 @@ struct AppConfig {
 
     // Signal selection
     std::vector<std::string> selected_pins;
+
+    // Bus definitions
+    std::vector<BusDefinition> buses;
+
+    // XDC pin alias file (optional)
+    std::string xdc_path;
 
     /// Save config to a JSON file. Returns true on success.
     bool save(const std::string& path) const;

@@ -1,0 +1,8 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "xdc_parser",
+    srcs = ["xdc_parser.cpp"],
+    hdrs = ["xdc_parser.h"],
+    visibility = ["//visibility:public"],
+)

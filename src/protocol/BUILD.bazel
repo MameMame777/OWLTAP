@@ -1,0 +1,20 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "protocol_decoders",
+    srcs = [
+        "i2c_decoder.cpp",
+        "spi_decoder.cpp",
+        "uart_decoder.cpp",
+    ],
+    hdrs = [
+        "i2c_decoder.h",
+        "protocol.h",
+        "spi_decoder.h",
+        "uart_decoder.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/capture:capture_engine",
+    ],
+)

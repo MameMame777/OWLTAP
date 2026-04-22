@@ -1,0 +1,154 @@
+<p align="center">
+  <img src="docs/icon.png" alt="JTAG Waveform Viewer" width="160"/>
+</p>
+
+<h1 align="center">JTAG FPGA Waveform Viewer</h1>
+
+<p align="center">
+  A desktop JTAG boundary-scan diagnostic and waveform capture tool for FPGA/SoC devices,
+  built with FTDI MPSSE, Dear ImGui, and ImPlot.
+</p>
+
+---
+
+## Features
+
+| Feature | Detail |
+|---------|--------|
+| **JTAG chain detection** | Auto-enumerates devices; reads IDCODE and IR length |
+| **BSDL parsing** | Loads vendor BSDL files; maps logical pin names to BSR bit positions |
+| **Boundary scan (EXTEST)** | Drive output pins HIGH/LOW/Hi-Z; read captured input values |
+| **Safety guard** | Blocks EXTEST when Zynq PS\_DDR / PS\_MIO / PS\_POR\_B / PS\_SRST\_B pins detected |
+| **Waveform capture** | Continuous or triggered multi-channel capture with configurable depth |
+| **Trigger engine** | Rising edge, falling edge, either edge, level; pre/post-trigger ratio |
+| **ImPlot waveform view** | Zoomable, pannable signal waveform display |
+| **VCD export** | Standard Value Change Dump export for GTKWave / Vivado logic analyser |
+| **Script engine** | Simple text script for automated set/expect sequences |
+| **Config persistence** | Last device settings saved to `cfg.json` |
+
+## Hardware Requirements
+
+| Component | Requirement |
+|-----------|-------------|
+| FTDI adapter | FT2232H / FT4232H (MPSSE-capable); tested with FT4232H VID=0x0403 PID=0x6011 |
+| Target device | Any IEEE 1149.1-compliant FPGA or SoC with a BSDL file |
+| OS | Windows 10/11 (64-bit) |
+| OpenGL | OpenGL 3.3 core profile |
+
+Verified hardware: Xilinx Zynq XA7Z020-CLG484 PL TAP + ARM DAP via FTDI FT4232H.
+
+## Architecture
+
+```
+┌─────────────────────────────────────┐
+│          Qt6 GUI (ImGui/ImPlot)     │  ← app_window, signal_panel, waveform_view
+├─────────────────────────────────────┤
+│  Boundary Scan: Scanner / PinDriver │  ← BSR staging, EXTEST, capture decoding
+│  Capture Engine + Trigger           │  ← ring buffer, edge/level trigger
+├─────────────────────────────────────┤
+│  JTAG Chain + BSDL Parser           │  ← device enumeration, pin mapping
+├─────────────────────────────────────┤
+│  TAP Controller  (IEEE 1149.1 FSM)  │  ← TMS path generation
+├─────────────────────────────────────┤
+│  MPSSE Command Buffer               │  ← FTDI protocol encoding
+├─────────────────────────────────────┤
+│  FtdiDevice  (libftdi1)             │  ← USB bulk transfer
+└─────────────────────────────────────┘
+```
+
+## Build
+
+### Prerequisites
+
+| Tool | Version |
+|------|---------|
+| Bazelisk | any (downloads correct Bazel version) |
+| MSVC | 2022 (C++17) |
+| Python | 3.x (for Bazel scripts) |
+
+libftdi1 and libusb-1.0 are vendored under `third_party/`.
+
+### Commands
+
+```powershell
+# Build the viewer
+bazelisk build //src:jtag_viewer
+
+# Embed taskbar icon into the .exe (Windows only, requires Pillow)
+Set-ItemProperty bazel-bin/src/jtag_viewer.exe -Name IsReadOnly -Value $false
+python tools/embed_icon.py bazel-bin/src/jtag_viewer.exe docs/icon.png
+
+# Run all unit tests (no hardware required)
+bazelisk test //test/...
+
+# Build with debug symbols
+bazelisk build --config=debug //src:jtag_viewer
+
+# Build the diagnostic CLI tool
+bazelisk build //src/tools:jtag_diag
+```
+
+The binary is produced at `bazel-bin/src/jtag_viewer.exe`.
+
+## Usage
+
+1. Connect the FTDI adapter to the target board's JTAG header.
+2. Run `jtag_viewer.exe`.
+3. **Device** → **Connect**: select VID/PID/serial and channel; click Connect.
+4. **Device** → **Load BSDL**: choose the `.bsd` / `.bsdl` file for your target.
+5. **Signal Panel**: select pins to monitor or drive.
+6. **Capture** → **Start** to begin waveform acquisition.
+7. **File** → **Export VCD** to save captured waveforms.
+
+### Script Engine
+
+Create a plain-text script file and load it via **File** → **Run Script**:
+
+```
+# Drive LED HIGH and verify
+set LED0 1
+apply
+expect LED0 1
+
+# Release to Hi-Z
+highz LED0
+apply
+```
+
+## Project Structure
+
+```
+src/
+  boundary_scan/   -- BSR staging free functions + PinDriver
+  bsdl/            -- BSDL lexer, parser, model
+  capture/         -- CaptureEngine ring buffer + trigger logic
+  ftdi/            -- libftdi1 wrapper (FtdiDevice) + MPSSE buffer
+  gui/             -- ImGui application window, panels, dialogs
+  jtag/            -- JtagChain + TAP controller FSM
+  script/          -- ScriptEngine (set/expect/apply/highz)
+  tools/           -- jtag_diag CLI diagnostic tool
+test/              -- Google Test unit tests (no hardware required)
+third_party/       -- vendored libftdi1, libusb-1.0, GLFW, ImGui, ImPlot
+docs/              -- architecture references, implementation plans
+```
+
+## Testing
+
+Unit tests cover all hardware-independent logic:
+
+```
+//test:bsdl_parser_test    -- BSDL lexer + parser
+//test:mpsse_test          -- MPSSE command encoding
+//test:tap_controller_test -- TAP state machine
+//test:trigger_test        -- Trigger engine
+//test:scanner_test        -- Boundary-scan decoder
+//test:pin_driver_test     -- BSR staging free functions
+//test:script_engine_test  -- Script parser + executor
+```
+
+Hardware-dependent paths (`FtdiDevice`, `JtagChain::readBSR/writeBSR`) require a
+physical FTDI adapter and are exercised manually or via `jtag_diag`.
+
+## License
+
+*To be determined.*

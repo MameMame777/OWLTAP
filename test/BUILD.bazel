@@ -72,3 +72,49 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "bus_definition_test",
+    srcs = ["bus_definition_test.cpp"],
+    deps = [
+        "//src/gui:bus_definition",
+        "//src/boundary_scan:scanner",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "uart_decoder_test",
+    srcs = ["uart_decoder_test.cpp"],
+    deps = [
+        "//src/protocol:protocol_decoders",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "spi_decoder_test",
+    srcs = ["spi_decoder_test.cpp"],
+    deps = [
+        "//src/protocol:protocol_decoders",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "i2c_decoder_test",
+    srcs = ["i2c_decoder_test.cpp"],
+    deps = [
+        "//src/protocol:protocol_decoders",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "xdc_parser_test",
+    srcs = ["xdc_parser_test.cpp"],
+    deps = [
+        "//src/xdc:xdc_parser",
+        "@googletest//:gtest_main",
+    ],
+)
+

@@ -5,12 +5,21 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 
 namespace jtag::gui {
 
 std::vector<SignalPanel::PinGroup> SignalPanel::groups_;
 std::vector<std::string> SignalPanel::selected_order_;
 bool SignalPanel::selection_changed_ = false;
+
+std::vector<BusDefinition> SignalPanel::buses_;
+bool SignalPanel::bus_changed_ = false;
+char SignalPanel::bus_name_buf_[64] = {};
+std::vector<std::string> SignalPanel::bus_pending_signals_;
+bool SignalPanel::bus_dialog_open_ = false;
+
+jtag::xdc::PinAliasMap SignalPanel::xdc_aliases_;
 
 SignalPanel::PinEntry* SignalPanel::findPin(const std::string& name) {
     for (auto& group : groups_) {
@@ -97,10 +106,11 @@ void SignalPanel::populateFromBsdl(const jtag::bsdl::BSDLDevice& device) {
         }
 
         PinEntry entry;
-        entry.name = name;
+        entry.name      = name;
+        entry.label     = name;  // default; overridden by setXdcAliases()
         entry.direction = dir_str;
-        entry.bsr_cell = cell.position;
-        entry.selected = false;
+        entry.bsr_cell  = cell.position;
+        entry.selected  = false;
         seen[name] = std::move(entry);
     }
 
@@ -129,6 +139,16 @@ void SignalPanel::populateFromBsdl(const jtag::bsdl::BSDLDevice& device) {
     // Sort groups alphabetically
     std::sort(groups_.begin(), groups_.end(),
               [](const PinGroup& a, const PinGroup& b) { return a.name < b.name; });
+
+    // Re-apply any existing XDC aliases so they survive a BSDL reload
+    if (!xdc_aliases_.empty()) {
+        for (auto& group : groups_) {
+            for (auto& pin : group.pins) {
+                auto it = xdc_aliases_.find(pin.name);
+                if (it != xdc_aliases_.end()) pin.label = it->second;
+            }
+        }
+    }
 }
 
 void SignalPanel::setSelectedSignals(const std::vector<std::string>& names) {
@@ -165,6 +185,56 @@ void SignalPanel::clear() {
     selection_changed_ = true;
 }
 
+// ── Bus management ──────────────────────────────────────────────────────────
+
+const std::vector<BusDefinition>& SignalPanel::buses() {
+    return buses_;
+}
+
+void SignalPanel::setBuses(const std::vector<BusDefinition>& buses) {
+    buses_ = buses;
+    bus_changed_ = true;
+}
+
+void SignalPanel::addBus(const BusDefinition& bus) {
+    for (auto& b : buses_) {
+        if (b.name == bus.name) {
+            b = bus;
+            bus_changed_ = true;
+            return;
+        }
+    }
+    buses_.push_back(bus);
+    bus_changed_ = true;
+}
+
+void SignalPanel::removeBus(const std::string& name) {
+    auto it = std::remove_if(buses_.begin(), buses_.end(),
+                             [&name](const BusDefinition& b) { return b.name == name; });
+    if (it != buses_.end()) {
+        buses_.erase(it, buses_.end());
+        bus_changed_ = true;
+    }
+}
+
+bool SignalPanel::consumeBusChanged() {
+    const bool changed = bus_changed_;
+    bus_changed_ = false;
+    return changed;
+}
+
+void SignalPanel::setXdcAliases(const jtag::xdc::PinAliasMap& aliases) {
+    xdc_aliases_ = aliases;
+
+    // Apply (or clear) labels on all existing PinEntry objects.
+    for (auto& group : groups_) {
+        for (auto& pin : group.pins) {
+            auto it = aliases.find(pin.name);
+            pin.label = (it != aliases.end()) ? it->second : pin.name;
+        }
+    }
+}
+
 void SignalPanel::draw() {
     ImGui::Begin("Signals");
 
@@ -191,6 +261,104 @@ void SignalPanel::draw() {
             for (auto& p : g.pins) p.selected = false;
         selected_order_.clear();
         selection_changed_ = true;
+    }
+
+    // ── Group into Bus button ───────────────────────────────────────────
+    int checked_count = 0;
+    for (const auto& order_name : selected_order_) {
+        (void)order_name;
+        checked_count++;
+    }
+    // Count checked pins (those in selected_order_)
+    const bool can_group = checked_count >= 2;
+    if (!can_group) ImGui::BeginDisabled();
+    if (ImGui::SmallButton("Group into Bus")) {
+        bus_pending_signals_ = selected_order_;
+        bus_name_buf_[0] = '\0';
+        bus_dialog_open_ = true;
+        ImGui::OpenPopup("Define Bus");
+    }
+    if (!can_group) ImGui::EndDisabled();
+    if (can_group) {
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Group %d selected signal(s) into a named multi-bit bus",
+                              checked_count);
+        }
+    }
+
+    // ── Define Bus popup ────────────────────────────────────────────────────
+    ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_Always);
+    if (ImGui::BeginPopupModal("Define Bus", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Bus name:");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(200);
+        ImGui::InputText("##busname", bus_name_buf_, sizeof(bus_name_buf_));
+
+        ImGui::Separator();
+        ImGui::TextDisabled("Signal order (MSB first, use ^ v to reorder):");
+
+        int move_from = -1, move_to = -1;
+        for (size_t i = 0; i < bus_pending_signals_.size(); i++) {
+            ImGui::PushID(static_cast<int>(i));
+            bool can_up   = (i > 0);
+            bool can_down = (i + 1 < bus_pending_signals_.size());
+            if (!can_up) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("^")) { move_from = static_cast<int>(i); move_to = static_cast<int>(i - 1); }
+            if (!can_up) ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (!can_down) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("v")) { move_from = static_cast<int>(i); move_to = static_cast<int>(i + 1); }
+            if (!can_down) ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::Text("%zu: %s", i, bus_pending_signals_[i].c_str());
+            ImGui::PopID();
+        }
+        if (move_from >= 0 && move_to >= 0)
+            std::swap(bus_pending_signals_[move_from], bus_pending_signals_[move_to]);
+
+        ImGui::Separator();
+        const char* fmt_names[] = {"HEX", "DEC", "BIN"};
+        // find any existing bus with same name to prefill format
+        static int fmt_idx = 0;
+        ImGui::SetNextItemWidth(100);
+        ImGui::Combo("Format##busdef", &fmt_idx, fmt_names, 3);
+
+        ImGui::Separator();
+        bool name_ok = (bus_name_buf_[0] != '\0');
+        if (!name_ok) ImGui::BeginDisabled();
+        if (ImGui::Button("OK", ImVec2(80, 0))) {
+            BusDefinition newbus;
+            newbus.name = bus_name_buf_;
+            newbus.signals = bus_pending_signals_;
+            newbus.format  = static_cast<BusFormat>(fmt_idx);
+            addBus(newbus);
+            ImGui::CloseCurrentPopup();
+        }
+        if (!name_ok) ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(80, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    // ── Defined Buses section ───────────────────────────────────────────────
+    if (!buses_.empty()) {
+        ImGui::Separator();
+        ImGui::TextDisabled("Defined Buses:");
+        for (size_t i = 0; i < buses_.size(); i++) {
+            const auto& bus = buses_[i];
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::BulletText("%s [%zu bits]", bus.name.c_str(), bus.signals.size());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("X")) {
+                removeBus(bus.name);
+                ImGui::PopID();
+                break;  // vector modified; restart loop next frame
+            }
+            ImGui::PopID();
+        }
     }
 
     ImGui::Separator();
@@ -282,9 +450,15 @@ void SignalPanel::draw() {
 
             // Individual pins
             for (auto& pin : group.pins) {
-                char pin_id[256];
-                snprintf(pin_id, sizeof(pin_id), "%s##%s",
-                         pin.name.c_str(), pin.name.c_str());
+                // If XDC alias differs from BSDL name, show "alias (bsdl_name)##bsdl_name".
+                char pin_id[512];
+                if (pin.label != pin.name) {
+                    snprintf(pin_id, sizeof(pin_id), "%s (%s)##%s",
+                             pin.label.c_str(), pin.name.c_str(), pin.name.c_str());
+                } else {
+                    snprintf(pin_id, sizeof(pin_id), "%s##%s",
+                             pin.label.c_str(), pin.name.c_str());
+                }
                 if (ImGui::Checkbox(pin_id, &pin.selected)) {
                     if (pin.selected) {
                         addToSelectedOrder(pin.name);

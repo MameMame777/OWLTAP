@@ -112,6 +112,10 @@ struct BSDLDevice {
     // Pin information
     std::map<std::string, PinInfo> pins;  // name -> PinInfo
 
+    // Package pin mapping (signal name -> package pin designator, e.g. "IO_L4P_T0_35" -> "M14").
+    // Populated from the BSDL PIN_MAP / PIN_MAP_STRING attribute.
+    std::map<std::string, std::string> package_pin_map;
+
     // Device identification
     IdCode idcode;
 

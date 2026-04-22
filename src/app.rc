@@ -1,0 +1,6 @@
+// Windows resource file for JTAG FPGA Waveform Viewer.
+// GLFW Win32 backend looks for a named "GLFW_ICON" icon resource and uses it
+// as the window class icon (taskbar + title bar) when glfwSetWindowIcon is
+// called with count=0.  The embedded RGBA path (icon_rgba_48.h) covers the
+// runtime window icon for all platforms.
+GLFW_ICON ICON "jtag.ico"

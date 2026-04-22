@@ -6,13 +6,16 @@
 #include <cstdio>
 #include <string>
 
+#include "bus_definition.h"
+
 namespace jtag::gui {
 
 DisplayFormat HexPanel::format_ = DisplayFormat::HEX;
 bool HexPanel::show_bsr_dump_ = false;
 std::vector<std::string> HexPanel::current_signals_;
 jtag::ScanResult HexPanel::current_result_;
-std::vector<HexPanel::BusDefinition> HexPanel::buses_;
+std::vector<BusDefinition> HexPanel::buses_;
+jtag::xdc::PinAliasMap HexPanel::xdc_aliases_;
 
 void HexPanel::updateValues(const jtag::ScanResult& result,
                              const std::vector<std::string>& signals) {
@@ -20,13 +23,12 @@ void HexPanel::updateValues(const jtag::ScanResult& result,
     current_signals_ = signals;
 }
 
-void HexPanel::defineBus(const std::string& bus_name,
-                          const std::vector<std::string>& signal_names) {
-    buses_.push_back({bus_name, signal_names});
+void HexPanel::setBuses(const std::vector<BusDefinition>& buses) {
+    buses_ = buses;
 }
 
-void HexPanel::clearBuses() {
-    buses_.clear();
+void HexPanel::setXdcAliases(const jtag::xdc::PinAliasMap& aliases) {
+    xdc_aliases_ = aliases;
 }
 
 void HexPanel::draw() {
@@ -56,19 +58,12 @@ void HexPanel::draw() {
             ImGui::TableNextColumn();
             ImGui::Text("%s", bus.name.c_str());
 
-            int bits = static_cast<int>(bus.signals.size());
-            uint64_t value = 0;
+            const int bits = static_cast<int>(bus.signals.size());
             bool all_known = true;
-
-            for (int i = 0; i < bits; i++) {
-                jtag::PinState state =
-                    current_result_.getPin(bus.signals[i]);
-                if (state == jtag::PinState::UNKNOWN) {
+            for (const auto& sig : bus.signals) {
+                if (current_result_.getPin(sig) == jtag::PinState::UNKNOWN) {
                     all_known = false;
                     break;
-                }
-                if (state == jtag::PinState::HIGH) {
-                    value |= (1ULL << (bits - 1 - i));
                 }
             }
 
@@ -76,35 +71,24 @@ void HexPanel::draw() {
             if (!all_known) {
                 ImGui::Text("???");
             } else {
+                const uint64_t value = computeBusValue(bus, current_result_);
                 char buf[128];
-                switch (format_) {
-                    case DisplayFormat::HEX:
-                        snprintf(buf, sizeof(buf), "0x%0*llX",
-                                 (bits + 3) / 4,
-                                 static_cast<unsigned long long>(value));
-                        break;
-                    case DisplayFormat::DECIMAL:
+                switch (bus.format) {
+                    case BusFormat::DEC:
                         snprintf(buf, sizeof(buf), "%llu",
                                  static_cast<unsigned long long>(value));
                         break;
-                    case DisplayFormat::BINARY: {
+                    case BusFormat::BIN: {
                         std::string bin = "0b";
-                        for (int i = bits - 1; i >= 0; i--) {
-                            bin += (value & (1ULL << i)) ? '1' : '0';
-                        }
+                        for (int b = bits - 1; b >= 0; b--)
+                            bin += (value & (1ULL << b)) ? '1' : '0';
                         snprintf(buf, sizeof(buf), "%s", bin.c_str());
                         break;
                     }
-                    case DisplayFormat::ASCII:
-                        if (bits == 8 && value >= 0x20 && value < 0x7F) {
-                            snprintf(buf, sizeof(buf), "'%c' (0x%02X)",
-                                     static_cast<char>(value),
-                                     static_cast<unsigned>(value));
-                        } else {
-                            snprintf(buf, sizeof(buf), "0x%0*llX",
-                                     (bits + 3) / 4,
-                                     static_cast<unsigned long long>(value));
-                        }
+                    default:  // HEX
+                        snprintf(buf, sizeof(buf), "0x%0*llX",
+                                 (bits + 3) / 4,
+                                 static_cast<unsigned long long>(value));
                         break;
                 }
                 ImGui::Text("%s", buf);
@@ -120,7 +104,15 @@ void HexPanel::draw() {
         for (const auto& sig : current_signals_) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::Text("%s", sig.c_str());
+            // Show "alias (sig)" when XDC alias available, otherwise just sig.
+            auto alias_it = xdc_aliases_.find(sig);
+            std::string display_name;
+            if (alias_it != xdc_aliases_.end()) {
+                display_name = alias_it->second + " (" + sig + ")";
+            } else {
+                display_name = sig;
+            }
+            ImGui::Text("%s", display_name.c_str());
 
             jtag::PinState state = current_result_.getPin(sig);
             ImGui::TableNextColumn();

@@ -59,6 +59,7 @@ private:
     void onSaveScript(bool save_as);
     void onLoadConfig();
     void onSaveConfig();
+    void onLoadXdc(const std::string& path);
     void refreshFromCapture();
     bool loadScriptFile(const std::string& path, std::string& error);
     bool saveScriptFile(const std::string& path, std::string& error) const;

@@ -113,6 +113,47 @@ static std::vector<std::string> jsonStringArray(const std::string& json,
     return result;
 }
 
+// Parse an array of bus-definition objects from a JSON string.
+// Expected format: [{"name":"B","signals":["A","B"],"format":"HEX"}, ...]
+static std::vector<BusDefinition> jsonBusArray(const std::string& json,
+                                                const std::string& key) {
+    std::vector<BusDefinition> result;
+    std::string search = "\"" + key + "\"";
+    size_t p = json.find(search);
+    if (p == std::string::npos) return result;
+    p = json.find('[', p + search.size());
+    if (p == std::string::npos) return result;
+    p++;  // skip '['
+
+    while (p < json.size()) {
+        // Skip whitespace and commas
+        while (p < json.size() && (json[p] == ' ' || json[p] == '\t' ||
+               json[p] == '\n' || json[p] == '\r' || json[p] == ',')) p++;
+        if (p >= json.size() || json[p] == ']') break;
+        if (json[p] != '{') { p++; continue; }
+
+        // Find matching '}'
+        size_t obj_start = p;
+        size_t obj_end = json.find('}', obj_start + 1);
+        if (obj_end == std::string::npos) break;
+        std::string obj = json.substr(obj_start, obj_end - obj_start + 1);
+        p = obj_end + 1;
+
+        BusDefinition bus;
+        bus.name = jsonString(obj, "name");
+        if (bus.name.empty()) continue;
+        bus.signals = jsonStringArray(obj, "signals");
+
+        std::string fmt_str = jsonString(obj, "format");
+        if (fmt_str == "DEC") bus.format = BusFormat::DEC;
+        else if (fmt_str == "BIN") bus.format = BusFormat::BIN;
+        else bus.format = BusFormat::HEX;
+
+        result.push_back(std::move(bus));
+    }
+    return result;
+}
+
 // ── AppConfig implementation ─────────────────────────────────────────────────
 
 bool AppConfig::save(const std::string& path) const {
@@ -135,7 +176,31 @@ bool AppConfig::save(const std::string& path) const {
         f << "\n";
     }
     if (!selected_pins.empty()) f << "  ";
-    f << "]\n";
+    f << "],\n";
+
+    // Buses
+    f << "  \"buses\": [";
+    for (size_t i = 0; i < buses.size(); i++) {
+        const auto& bus = buses[i];
+        if (i == 0) f << "\n";
+        f << "    {\"name\":\"" << jsonEscape(bus.name) << "\","
+          << "\"signals\":[";
+        for (size_t j = 0; j < bus.signals.size(); j++) {
+            f << "\"" << jsonEscape(bus.signals[j]) << "\"";
+            if (j + 1 < bus.signals.size()) f << ",";
+        }
+        const char* fmt_str =
+            (bus.format == BusFormat::DEC) ? "DEC" :
+            (bus.format == BusFormat::BIN) ? "BIN" : "HEX";
+        f << "],\"format\":\"" << fmt_str << "\"}";
+        if (i + 1 < buses.size()) f << ",";
+        f << "\n";
+    }
+    if (!buses.empty()) f << "  ";
+    f << "],\n";
+
+    // XDC pin alias file
+    f << "  \"xdc_path\": \"" << jsonEscape(xdc_path) << "\"\n";
     f << "}\n";
     return f.good();
 }
@@ -157,6 +222,8 @@ AppConfig AppConfig::load(const std::string& path) {
     cfg.bsdl_path         = jsonString(json, "bsdl_path");
     cfg.bsdl_device_index = static_cast<int>(jsonInt(json, "bsdl_device_index",      0));
     cfg.selected_pins     = jsonStringArray(json, "selected_pins");
+    cfg.buses             = jsonBusArray(json, "buses");
+    cfg.xdc_path          = jsonString(json, "xdc_path");
     return cfg;
 }
 

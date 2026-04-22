@@ -8,12 +8,25 @@ cc_library(
 )
 
 cc_library(
+    name = "bus_definition",
+    srcs = ["bus_definition.cpp"],
+    hdrs = ["bus_definition.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":app_config",
+        "//src/boundary_scan:scanner",
+    ],
+)
+
+cc_library(
     name = "gui",
     srcs = [
         "app_window.cpp",
+        "bus_definition.cpp",
         "debug_log_panel.cpp",
         "device_dialog.cpp",
         "hex_panel.cpp",
+        "protocol_panel.cpp",
         "signal_panel.cpp",
         "trigger_dialog.cpp",
         "vcd_export.cpp",
@@ -21,9 +34,11 @@ cc_library(
     ],
     hdrs = [
         "app_window.h",
+        "bus_definition.h",
         "debug_log_panel.h",
         "device_dialog.h",
         "hex_panel.h",
+        "protocol_panel.h",
         "signal_panel.h",
         "trigger_dialog.h",
         "vcd_export.h",
@@ -42,7 +57,9 @@ cc_library(
         "//src/ftdi:ftdi_device",
         "//src/jtag:jtag_chain",
         "//src/jtag:tap_controller",
+        "//src/protocol:protocol_decoders",
         "//src/script:script_engine",
+        "//src/xdc:xdc_parser",
         "//third_party/glfw",
         "//third_party/imgui",
         "//third_party/implot",

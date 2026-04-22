@@ -30,9 +30,11 @@
 #include "debug_log_panel.h"
 #include "device_dialog.h"
 #include "hex_panel.h"
+#include "protocol_panel.h"
 #include "signal_panel.h"
 #include "src/config/pl_config.h"
 #include "src/script/script_engine.h"
+#include "src/xdc/xdc_parser.h"
 #include "trigger_dialog.h"
 #include "vcd_export.h"
 #include "waveform_view.h"
@@ -181,15 +183,19 @@ private:
 
 static void syncSelectionViews(const std::vector<jtag::SampleFrame>& samples) {
     const auto selected = SignalPanel::selectedSignals();
-    if (selected.empty()) {
+    const auto& buses   = SignalPanel::buses();
+
+    if (selected.empty() && buses.empty()) {
         WaveformView::clearData();
         HexPanel::updateValues(
             samples.empty() ? jtag::ScanResult{} : samples.back().data,
             selected);
+        HexPanel::setBuses({});
         return;
     }
 
-    WaveformView::setData(selected, samples);
+    WaveformView::setData(selected, buses, samples);
+    HexPanel::setBuses(buses);
 
     if (samples.empty()) {
         WaveformView::setCursorPosition(-1);
@@ -335,7 +341,8 @@ void AppWindow::run() {
 
         // Panels
         SignalPanel::draw();
-        if (SignalPanel::consumeSelectionChanged()) {
+        if (SignalPanel::consumeSelectionChanged() ||
+            SignalPanel::consumeBusChanged()) {
             syncSelectionViews(capture_engine_
                                    ? capture_engine_->getSamples()
                                    : std::vector<jtag::SampleFrame>{});
@@ -359,6 +366,18 @@ void AppWindow::run() {
             onFitWaveforms();
         }
         HexPanel::draw();
+
+        // Protocol panel
+        {
+            const auto current_samples = capture_engine_
+                ? capture_engine_->getSamples()
+                : std::vector<jtag::SampleFrame>{};
+            ProtocolPanel::draw(SignalPanel::selectedSignals(), current_samples);
+            if (ProtocolPanel::consumeNewFrames()) {
+                WaveformView::setAnnotations(ProtocolPanel::decodedFrames());
+            }
+        }
+
         drawPinControlPanel();
         drawScriptRunnerPanel();
         DebugLogPanel::draw(status_text_);
@@ -492,8 +511,11 @@ void AppWindow::onDisconnect() {
     config_.save("cfg.json");
 
     SignalPanel::clear();
+    SignalPanel::setXdcAliases({});
     WaveformView::clearData();
-    HexPanel::clearBuses();
+    WaveformView::setSignalAliases({});
+    HexPanel::setBuses({});
+    HexPanel::setXdcAliases({});
     pin_readback_ = jtag::ScanResult{};
     pin_readback_error_.clear();
     extest_outputs_active_ = false;
@@ -1118,7 +1140,57 @@ void AppWindow::onLoadConfig() {
     if (!config_.selected_pins.empty())
         SignalPanel::setSelectedSignals(config_.selected_pins);
 
+    // Restore bus definitions
+    SignalPanel::setBuses(config_.buses);
+
+    // Restore XDC aliases
+    if (!config_.xdc_path.empty()) {
+        onLoadXdc(config_.xdc_path);
+    } else {
+        SignalPanel::setXdcAliases({});
+        WaveformView::setSignalAliases({});
+        HexPanel::setXdcAliases({});
+    }
+
     setStatusMessage("Config loaded: " + path);
+}
+
+void AppWindow::onLoadXdc(const std::string& path) {
+    // Parse XDC: package_pin_designator -> user_port (e.g. "M14" -> "led_out[0]")
+    const auto pkg_to_port = jtag::xdc::parseXdc(path);
+
+    // Compose with BSDL package_pin_map to get signal_name -> user_label.
+    // BSDL boundary cell pin names are IO buffer names, not package pin designators,
+    // so we bridge via the PIN_MAP attribute.
+    jtag::xdc::PinAliasMap signal_to_label;
+    if (chain_ && bsdl_device_index_ >= 0 &&
+        bsdl_device_index_ < static_cast<int>(chain_->devices().size()) &&
+        chain_->devices()[bsdl_device_index_].bsdl) {
+        const auto& pkg_pin_map =
+            chain_->devices()[bsdl_device_index_].bsdl->package_pin_map;
+        for (const auto& [signal, pkg_pin] : pkg_pin_map) {
+            auto it = pkg_to_port.find(pkg_pin);
+            if (it != pkg_to_port.end()) {
+                signal_to_label[signal] = it->second;
+            }
+        }
+    }
+
+    // Fallback: Xilinx 7-series / Zynq BSDL names user IO signals as
+    // "IO_<package_pin>" (e.g. signal "IO_M14" on package pin M14).
+    // Add these heuristic entries for any pkg_pin not already resolved above.
+    // emplace() is a no-op when the key already exists, so PIN_MAP-based
+    // results take precedence.
+    for (const auto& [pkg_pin, user_port] : pkg_to_port) {
+        signal_to_label.emplace("IO_" + pkg_pin, user_port);
+    }
+
+    SignalPanel::setXdcAliases(signal_to_label);
+    WaveformView::setSignalAliases(signal_to_label);
+    HexPanel::setXdcAliases(signal_to_label);
+    config_.xdc_path = path;
+    config_.save("cfg.json");
+    setStatusMessage("XDC loaded: " + path);
 }
 
 void AppWindow::onSaveConfig() {
@@ -1131,6 +1203,7 @@ void AppWindow::onSaveConfig() {
         path += ".json";
 
     config_.selected_pins = SignalPanel::selectedSignals();
+    config_.buses         = SignalPanel::buses();
     if (config_.save(path)) {
         setStatusMessage("Config saved: " + path);
     } else {
@@ -1258,6 +1331,10 @@ void AppWindow::buildMenuBar() {
             if (ImGui::MenuItem("Load Config...")) {
                 onLoadConfig();
             }
+            if (ImGui::MenuItem("Load XDC...", nullptr, false, bsdl_device_index_ >= 0)) {
+                std::string xdc_path = openFileDialog("Load XDC", "XDC Files\0*.xdc\0All Files\0*.*\0");
+                if (!xdc_path.empty()) onLoadXdc(xdc_path);
+            }
             if (ImGui::MenuItem("Save Config", "Ctrl+S")) {
                 onSaveConfig();
             }
@@ -1318,6 +1395,11 @@ void AppWindow::buildMenuBar() {
                                      !program_pl_running_.load();
             if (ImGui::MenuItem("Program  Bitstream...", nullptr, false, can_program)) {
                 onProgramPl();
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Protocol Analyzer...", nullptr,
+                                ProtocolPanel::isVisible())) {
+                ProtocolPanel::setVisible(!ProtocolPanel::isVisible());
             }
             ImGui::EndMenu();
         }

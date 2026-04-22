@@ -480,6 +480,14 @@ void BSDLParser::parsePinMap(BSDLLexer& lexer, BSDLDevice& dev) {
             }
 
             if (!pin_name.empty() && !num_str.empty()) {
+                // Store signal_name -> package_pin_designator for XDC alias composition.
+                // Uppercase the package pin to match XDC PACKAGE_PIN convention.
+                std::string pkg_pin_upper = num_str;
+                for (char& c : pkg_pin_upper)
+                    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                dev.package_pin_map[pin_name] = pkg_pin_upper;
+
+                // Also try to store numeric physical_pin for backward compat.
                 auto it = dev.pins.find(pin_name);
                 if (it != dev.pins.end()) {
                     try { it->second.physical_pin = std::stoi(num_str); }

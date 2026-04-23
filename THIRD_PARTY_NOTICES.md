@@ -12,21 +12,25 @@ licenses.
 - Dear ImGui
   - Path: `third_party/imgui`
   - License: MIT
+  - License text: `third_party/imgui/LICENSE.txt`
   - Notes: Docking branch sources are vendored in this repository.
 
 - ImPlot
   - Path: `third_party/implot`
   - License: MIT
+  - License text: `third_party/implot/LICENSE`
 
 - GLFW
   - Path: `third_party/glfw`
   - License: zlib/libpng license
+  - License text: `third_party/glfw/LICENSE.md`
 
 - libusb 1.0.27
   - Path: `third_party/libusb`
   - License: GNU LGPL v2.1 or later
   - Notes: Linux builds link the system library. Windows builds compile the
     vendored source in this repository.
+  - Upstream COPYING: `third_party/libusb/libusb-src/libusb-1.0.27/COPYING`
   - Included text: `THIRD_PARTY_LICENSES/LGPL-2.1.txt`
   - Companion text: `THIRD_PARTY_LICENSES/GPL-2.0.txt` (referenced by LGPL 2.1)
 
@@ -35,8 +39,20 @@ licenses.
   - License: LGPL-2.1-only
   - Notes: Linux builds link the system library. Windows builds compile the
     vendored source in this repository.
+  - Attribution notice: `third_party/libftdi/LICENSE`
   - Included text: `THIRD_PARTY_LICENSES/LGPL-2.1.txt`
   - Companion text: `THIRD_PARTY_LICENSES/GPL-2.0.txt` (referenced by LGPL 2.1)
+
+- GoogleTest
+  - Used by: unit tests only (`test/...`), not linked into the shipped
+    `jtag_viewer` binary.
+  - Source: fetched via Bazel module (`googletest` in `MODULE.bazel`)
+  - License: BSD-3-Clause
+
+- Digilent Zybo Z7 Master XDC
+  - File: `z7020_maseter.xdc`
+  - Source: <https://github.com/Digilent/digilent-xdc>
+  - License: MIT (Digilent, Inc.)
 
 - stb components bundled with Dear ImGui
   - Paths:
@@ -44,6 +60,23 @@ licenses.
     - `third_party/imgui/imgui-src/imstb_textedit.h`
     - `third_party/imgui/imgui-src/imstb_truetype.h`
   - License: MIT or public domain / Unlicense, as stated in each upstream file.
+
+## User-generated Xilinx artifacts
+
+The following files in this repository are user-generated outputs of the
+Xilinx / AMD Vivado Design Suite, used as example designs for hardware
+verification and documentation:
+
+- `docs/AXIUART_Top.bit`
+- `docs/blink_speed.bit`
+- `docs/design_1_wrapper.bit`
+- `blink_speed.prm`
+
+These are considered user-generated artifacts (user HDL compiled with
+Vivado) and are not part of the MIT-licensed original source of this
+project. They are provided only as reference assets. Users generating
+their own equivalent outputs should refer to the end-user license terms
+of the Xilinx / AMD tool they use.
 
 ## Optional runtime assets (not vendored)
 

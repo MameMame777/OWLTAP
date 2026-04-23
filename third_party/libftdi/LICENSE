@@ -1,0 +1,40 @@
+libftdi1 - A library to talk to FTDI chips via libusb
+
+Copyright (C) 2003-2020 Intra2net AG and the libftdi developers
+  <opensource@intra2net.com>
+
+libftdi1 is distributed under the terms of the GNU Lesser General Public
+License, version 2.1 only (LGPL-2.1-only), as indicated by the
+SPDX-License-Identifier in each source file.
+
+The full text of LGPL-2.1 is provided at:
+  THIRD_PARTY_LICENSES/LGPL-2.1.txt
+
+LGPL-2.1 references the GNU General Public License, version 2, whose
+full text is provided at:
+  THIRD_PARTY_LICENSES/GPL-2.0.txt
+
+Upstream project home: https://www.intra2net.com/en/developer/libftdi/
+Upstream source       : https://www.intra2net.com/en/developer/libftdi/download.php
+
+The files in third_party/libftdi/libftdi-src/ are verbatim copies of the
+corresponding files from the libftdi1-1.5 upstream release. See each
+source file's header for individual copyright notices and the
+SPDX-License-Identifier.
+
+Contributor list (non-exhaustive, see upstream AUTHORS file for full
+attribution): Intra2net AG and a large number of community contributors
+including Alain Abbas, Alex Harford, Alexander Lehmann, Anders Larsen,
+Andrei Errapart, Andrew John Rogers, Arnim Laeuger, Aurelien Jarno,
+Benjamin Vanheuverzwijn, Chris Morgan, Chris Zeh, Clifford Wolf,
+Daniel Kirkham, David Challis, Davide Michelizza, Denis Sirotkin, Emil,
+Evan Nemerson, Evgeny Sinelnikov, Flynn Marquardt, Forest Crossman,
+Ian Abbott, Jared Boone, Jarkko Sonninen, Jean-Daniel Merkli,
+Jochen Sprickerhof, Juergen Beisert, Lorenz Moesenlechner,
+Marek Vavrusa, Marius Kintel, Mark Haemmerling, Matthias Kranz,
+Matthias Richter, Matthijs ten Berge, Max, Michel Zou, Mike Frysinger,
+Nathael Pajani, Nathan Fraser, Oleg Seiljus, Paul Fertser, Peter Holik,
+Raphael Assenat, Rogier Wolff, Stephan Linz, Steven Turner,
+Tarek Heiland, Thimo Eichstaedt, Thomas Fischl, Thomas Klose,
+Tim Ansell, Tom Saunders, Uwe Bonnes, Vladimir Yakovlev,
+Wilfried Holzke, Xiaofan Chen, Yi-Shin Li.

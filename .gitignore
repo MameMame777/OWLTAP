@@ -10,6 +10,9 @@ imgui.ini
 *.bsdl
 *.bsd
 
+# Xilinx flash image artifacts (user-generated; keep out of source tree)
+*.mcs
+
 # Local upstream source archives; extracted vendor trees are tracked instead
 third_party/libusb/libusb-1.0.27-src.zip
 third_party/libftdi/libftdi1-1.5.tar.bz2

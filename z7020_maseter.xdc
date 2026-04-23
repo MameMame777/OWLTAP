@@ -1,3 +1,7 @@
+## Origin:  Digilent "Zybo-Z7-Master.xdc" from https://github.com/Digilent/digilent-xdc
+## Author:  Digilent, Inc.
+## License: MIT (see https://github.com/Digilent/digilent-xdc/blob/master/LICENSE)
+##
 ## This file is a general .xdc for the Zybo Z7 Rev. B
 ## It is compatible with the Zybo Z7-20 and Zybo Z7-10
 ## To use it in a project:

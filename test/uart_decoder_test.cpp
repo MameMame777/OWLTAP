@@ -95,4 +95,132 @@ TEST(UartDecoderTest, EmptyFrames) {
     EXPECT_TRUE(decoded.empty());
 }
 
+// ---------------------------------------------------------------------------
+// Extended frame builder: optional parity, bad stop bit, parity flip.
+// Parity is computed correctly unless flip_parity=true (injects error).
+// bad_stop=true drives the stop bit LOW (framing error).
+// ---------------------------------------------------------------------------
+static std::vector<jtag::SampleFrame> buildUartFramesEx(
+        const std::string& pin, uint8_t data_byte, int spb,
+        bool parity_enable, bool parity_odd,
+        bool bad_stop = false, bool flip_parity = false) {
+    std::vector<jtag::SampleFrame> frames;
+    auto t0 = std::chrono::steady_clock::now();
+    auto addBit = [&](bool high, int n) {
+        for (int i = 0; i < n; i++) {
+            jtag::SampleFrame sf;
+            sf.timestamp = t0 + std::chrono::microseconds(frames.size());
+            sf.data.pin_states[pin] = high ? jtag::PinState::HIGH : jtag::PinState::LOW;
+            frames.push_back(sf);
+        }
+    };
+    addBit(true, spb * 2);          // idle
+    addBit(false, spb);             // start bit
+    int ones = 0;
+    for (int b = 0; b < 8; b++) {
+        bool bit = (data_byte >> b) & 1;
+        if (bit) ones++;
+        addBit(bit, spb);
+    }
+    if (parity_enable) {
+        // correct parity, then optionally flip to inject error
+        bool pb = parity_odd ? ((ones % 2) == 0) : ((ones % 2) == 1);
+        if (flip_parity) pb = !pb;
+        addBit(pb, spb);
+    }
+    addBit(!bad_stop, spb * 2);     // stop bit (HIGH = OK, LOW = framing error)
+    return frames;
+}
+
+// Two bytes back-to-back with a shared time base.
+static std::vector<jtag::SampleFrame> buildTwoUartBytes(
+        const std::string& pin, uint8_t b1, uint8_t b2, int spb) {
+    std::vector<jtag::SampleFrame> frames;
+    auto t0 = std::chrono::steady_clock::now();
+    auto addBit = [&](bool high, int n) {
+        for (int i = 0; i < n; i++) {
+            jtag::SampleFrame sf;
+            sf.timestamp = t0 + std::chrono::microseconds(frames.size());
+            sf.data.pin_states[pin] = high ? jtag::PinState::HIGH : jtag::PinState::LOW;
+            frames.push_back(sf);
+        }
+    };
+    auto encodeFrame = [&](uint8_t byte) {
+        addBit(false, spb);
+        for (int b = 0; b < 8; b++) addBit((byte >> b) & 1, spb);
+        addBit(true, spb);
+    };
+    addBit(true, spb * 2);
+    encodeFrame(b1);
+    addBit(true, spb);       // inter-frame gap
+    encodeFrame(b2);
+    addBit(true, spb * 2);
+    return frames;
+}
+
+// ---------------------------------------------------------------------------
+// New tests
+// ---------------------------------------------------------------------------
+
+TEST(UartDecoderTest, EvenParityCorrect) {
+    // 0x41 = 01000001 → 2 ones → even parity bit = 0 → no error
+    const std::string pin = "RX";
+    const int spb = 9;
+    const uint32_t baud = 1000000u / static_cast<uint32_t>(spb);
+    auto frames = buildUartFramesEx(pin, 0x41, spb,
+                                    /*parity_enable=*/true, /*parity_odd=*/false);
+    jtag::protocol::UartConfig cfg;
+    cfg.rx_pin = pin; cfg.baud_rate = baud; cfg.data_bits = 8;
+    cfg.parity_enable = true; cfg.parity_odd = false;
+    auto decoded = jtag::protocol::decodeUart(frames, cfg);
+    ASSERT_FALSE(decoded.empty());
+    EXPECT_FALSE(decoded[0].error_flag);
+    EXPECT_EQ(decoded[0].data, "41");
+}
+
+TEST(UartDecoderTest, ParityError) {
+    // 0x55 = 01010101 → 4 ones → even parity bit = 0
+    // We flip parity bit → mismatch → error_flag = true
+    const std::string pin = "RX";
+    const int spb = 9;
+    const uint32_t baud = 1000000u / static_cast<uint32_t>(spb);
+    auto frames = buildUartFramesEx(pin, 0x55, spb,
+                                    /*parity_enable=*/true, /*parity_odd=*/false,
+                                    /*bad_stop=*/false, /*flip_parity=*/true);
+    jtag::protocol::UartConfig cfg;
+    cfg.rx_pin = pin; cfg.baud_rate = baud; cfg.data_bits = 8;
+    cfg.parity_enable = true; cfg.parity_odd = false;
+    auto decoded = jtag::protocol::decodeUart(frames, cfg);
+    ASSERT_FALSE(decoded.empty());
+    EXPECT_TRUE(decoded[0].error_flag);
+}
+
+TEST(UartDecoderTest, FramingError) {
+    // Stop bit is LOW → framing error
+    const std::string pin = "RX";
+    const int spb = 9;
+    const uint32_t baud = 1000000u / static_cast<uint32_t>(spb);
+    auto frames = buildUartFramesEx(pin, 0x42, spb,
+                                    /*parity_enable=*/false, /*parity_odd=*/false,
+                                    /*bad_stop=*/true);
+    jtag::protocol::UartConfig cfg;
+    cfg.rx_pin = pin; cfg.baud_rate = baud; cfg.data_bits = 8;
+    auto decoded = jtag::protocol::decodeUart(frames, cfg);
+    ASSERT_FALSE(decoded.empty());
+    EXPECT_TRUE(decoded[0].error_flag);
+}
+
+TEST(UartDecoderTest, TwoConsecutiveBytes) {
+    const std::string pin = "RX";
+    const int spb = 9;
+    const uint32_t baud = 1000000u / static_cast<uint32_t>(spb);
+    auto frames = buildTwoUartBytes(pin, 0xAB, 0xCD, spb);
+    jtag::protocol::UartConfig cfg;
+    cfg.rx_pin = pin; cfg.baud_rate = baud; cfg.data_bits = 8;
+    auto decoded = jtag::protocol::decodeUart(frames, cfg);
+    ASSERT_EQ(decoded.size(), 2u);
+    EXPECT_EQ(decoded[0].data, "AB");
+    EXPECT_EQ(decoded[1].data, "CD");
+}
+
 }  // namespace

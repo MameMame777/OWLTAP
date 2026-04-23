@@ -443,9 +443,7 @@ void AppWindow::run() {
         SignalPanel::draw();
         if (SignalPanel::consumeSelectionChanged() ||
             SignalPanel::consumeBusChanged()) {
-            syncSelectionViews(capture_engine_
-                                   ? capture_engine_->getSamples()
-                                   : std::vector<jtag::SampleFrame>{});
+            syncSelectionViews(cached_samples_);
         }
         const bool can_capture = (capture_engine_ != nullptr && !capturing_);
         const auto waveform_actions =
@@ -469,10 +467,7 @@ void AppWindow::run() {
 
         // Protocol panel
         {
-            const auto current_samples = capture_engine_
-                ? capture_engine_->getSamples()
-                : std::vector<jtag::SampleFrame>{};
-            ProtocolPanel::draw(SignalPanel::selectedSignals(), current_samples);
+            ProtocolPanel::draw(SignalPanel::selectedSignals(), cached_samples_);
             if (ProtocolPanel::consumeNewFrames()) {
                 WaveformView::setAnnotations(ProtocolPanel::decodedFrames());
             }
@@ -628,6 +623,7 @@ void AppWindow::onDisconnect() {
 
     SignalPanel::clear();
     SignalPanel::setXdcAliases({});
+    cached_samples_.clear();
     WaveformView::clearData();
     WaveformView::setSignalAliases({});
     HexPanel::setBuses({});
@@ -1121,6 +1117,7 @@ void AppWindow::onStartCapture() {
     if (capture_engine_->start()) {
         capturing_ = true;
         extest_outputs_active_ = false;
+        cached_samples_.clear();
         last_refresh_ = std::chrono::steady_clock::now();
         syncSelectionViews(std::vector<jtag::SampleFrame>{});
         WaveformView::requestResetView();
@@ -1149,6 +1146,7 @@ void AppWindow::onSingleCapture() {
     if (capture_engine_->start()) {
         capturing_ = true;
         extest_outputs_active_ = false;
+        cached_samples_.clear();
         last_refresh_ = std::chrono::steady_clock::now();
         syncSelectionViews(std::vector<jtag::SampleFrame>{});
         WaveformView::requestResetView();
@@ -1160,6 +1158,7 @@ void AppWindow::onClearWaveforms() {
     if (!capture_engine_ || capturing_) return;
 
     capture_engine_->clearSamples();
+    cached_samples_.clear();
     syncSelectionViews(std::vector<jtag::SampleFrame>{});
     WaveformView::requestResetView();
     setStatusMessage("Waveform buffer cleared.");
@@ -1182,6 +1181,7 @@ void AppWindow::refreshFromCapture() {
     if (!capture_engine_ || !scanner_) return;
 
     auto samples = capture_engine_->getSamples();
+    cached_samples_ = samples;  // update GUI cache (read every render frame)
     if (samples.empty()) return;
 
     syncSelectionViews(samples);

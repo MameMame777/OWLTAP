@@ -106,6 +106,7 @@ private:
     jtag::TriggerMode run_mode_ = jtag::TriggerMode::FREE_RUN;
     int bsdl_device_index_ = -1;
     std::chrono::steady_clock::time_point last_refresh_{};
+    std::vector<jtag::SampleFrame> cached_samples_;  // updated at ~20 Hz; used every render frame
     std::array<char, 8192> script_buffer_{};
     std::string script_path_;
     std::string script_output_;

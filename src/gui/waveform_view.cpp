@@ -40,6 +40,16 @@ void WaveformView::setData(const std::vector<std::string>& signals,
 
     auto t0 = samples.front().timestamp;
 
+    // During auto-scroll, only rebuild samples within 2x the visible window to
+    // keep lane reconstruction O(window) instead of O(ring-buffer-depth).
+    // Exception: when a fit is pending, rebuild the full buffer so the fit
+    // covers the complete acquisition range.
+    const double total_us = static_cast<double>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            samples.back().timestamp - t0).count());
+    const double clip_start_us = (auto_scroll_ && !fit_requested_)
+        ? (total_us - window_us_ * 2.0) : -1.0;
+
     // Binary signal lanes
     for (const auto& sig : signals) {
         SignalLane lane;
@@ -60,6 +70,7 @@ void WaveformView::setData(const std::vector<std::string>& signals,
             double us = static_cast<double>(
                 std::chrono::duration_cast<std::chrono::microseconds>(
                     samples[i].timestamp - t0).count());
+            if (us < clip_start_us) continue;  // outside visible window, skip
             lane.times.push_back(us);
 
             jtag::PinState state = samples[i].data.getPin(sig);
@@ -87,6 +98,7 @@ void WaveformView::setData(const std::vector<std::string>& signals,
             double us = static_cast<double>(
                 std::chrono::duration_cast<std::chrono::microseconds>(
                     samples[i].timestamp - t0).count());
+            if (us < clip_start_us) continue;  // outside visible window, skip
             lane.times.push_back(us);
             lane.bus_values.push_back(computeBusValue(bus, samples[i].data));
 

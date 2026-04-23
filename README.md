@@ -79,7 +79,7 @@ The FTDI COM-port driver (VCP) must **not** be bound to that interface at the sa
 
 ```powershell
 # Clone and enter the repository
-git clone https://github.com/<your-username>/jtag-fpga-viewer.git
+git clone https://github.com/MameMame777/jtag-fpga-viewer.git
 cd jtag-fpga-viewer
 
 # Build the viewer

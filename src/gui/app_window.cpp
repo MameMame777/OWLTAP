@@ -35,6 +35,7 @@
 #include "signal_panel.h"
 #include "src/boundary_scan/interconnect_test.h"
 #include "src/config/pl_config.h"
+#include "src/flash/flash_programmer.h"
 #include "src/script/script_engine.h"
 #include "src/script/test_suite.h"
 #include "src/xdc/xdc_parser.h"
@@ -520,6 +521,9 @@ void AppWindow::run() {
         // PL programming progress modal
         drawProgramPlModal();
 
+        // Flash programming progress modal
+        drawProgramFlashModal();
+
         // Periodic refresh from capture engine (~20 Hz)
         if (capturing_) {
             auto now = std::chrono::steady_clock::now();
@@ -594,6 +598,7 @@ void AppWindow::onConnect() {
 void AppWindow::onDisconnect() {
     // Wait for any PL programming thread before destroying backend objects
     if (program_pl_thread_.joinable()) program_pl_thread_.join();
+    if (program_flash_thread_.joinable()) program_flash_thread_.join();
 
     const bool had_backend_state = capturing_ || connected_ ||
         capture_engine_ != nullptr || pin_driver_ != nullptr ||
@@ -1872,6 +1877,12 @@ void AppWindow::buildMenuBar() {
             if (ImGui::MenuItem("Program  Bitstream...", nullptr, false, can_program)) {
                 onProgramPl();
             }
+            const bool can_flash = connected_ && !capturing_ &&
+                                   !program_pl_running_.load() &&
+                                   !program_flash_running_.load();
+            if (ImGui::MenuItem("Program  Flash (SPI ROM)...", nullptr, false, can_flash)) {
+                onProgramFlash();
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Protocol Analyzer...", nullptr,
                                 ProtocolPanel::isVisible())) {
@@ -2001,6 +2012,142 @@ void AppWindow::drawProgramPlModal() {
                 } else {
                     std::lock_guard<std::mutex> lk(program_pl_mutex_);
                     setStatusMessage("PL programming failed: " + program_pl_error_);
+                }
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndPopup();
+    }
+}
+
+// ── Flash Programming ───────────────────────────────────────────────
+
+void AppWindow::onProgramFlash() {
+    if (!connected_ || !chain_) return;
+    if (program_flash_running_.load()) return;
+
+    std::string bridge = openFileDialog(
+        "Select BSCAN SPI bridge bitstream",
+        "Bitstream Files (*.bit)\0*.bit\0All Files (*.*)\0*.*\0");
+    if (bridge.empty()) return;
+
+    std::string bin = openFileDialog(
+        "Select flash image (.bin or .mcs)",
+        "Flash Image (*.bin;*.mcs;*.hex)\0*.bin;*.mcs;*.hex\0All Files (*.*)\0*.*\0");
+    if (bin.empty()) return;
+
+    if (program_flash_thread_.joinable()) program_flash_thread_.join();
+
+    program_flash_bin_path_ = bin;
+    program_flash_bridge_path_ = bridge;
+    program_flash_phase_.store(0);
+    program_flash_done_.store(0);
+    program_flash_total_.store(0);
+    program_flash_success_.store(false);
+    {
+        std::lock_guard<std::mutex> lk(program_flash_mutex_);
+        program_flash_error_.clear();
+    }
+    program_flash_running_.store(true);
+    program_flash_popup_requested_ = true;
+
+    setStatusMessage("Programming Flash: " + bin);
+
+    program_flash_thread_ = std::thread([this, bin, bridge]() {
+        // Device 0 = PL TAP (same ordering as onProgramPl).
+        jtag::flash::FlashProgrammer programmer(*chain_, 0, bridge);
+        bool ok = programmer.program(
+            bin,
+            [this](jtag::flash::FlashPhase phase,
+                   std::size_t done, std::size_t total) {
+                program_flash_phase_.store(static_cast<int>(phase));
+                program_flash_done_.store(done);
+                program_flash_total_.store(total);
+            });
+        std::string err;
+        if (!ok) err = programmer.lastError();
+        {
+            std::lock_guard<std::mutex> lk(program_flash_mutex_);
+            program_flash_error_ = err;
+        }
+        program_flash_success_.store(ok);
+        program_flash_running_.store(false);
+    });
+}
+
+void AppWindow::drawProgramFlashModal() {
+    if (program_flash_popup_requested_) {
+        ImGui::OpenPopup("Programming Flash");
+        program_flash_popup_requested_ = false;
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(480.0f, 0.0f), ImGuiCond_Always);
+
+    if (ImGui::BeginPopupModal("Programming Flash", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        const std::string& path = program_flash_bin_path_;
+        const size_t slash = path.find_last_of("/\\");
+        const std::string fname = (slash != std::string::npos)
+                                      ? path.substr(slash + 1) : path;
+        ImGui::TextUnformatted(fname.c_str());
+        ImGui::Separator();
+
+        const bool running = program_flash_running_.load();
+        const auto phase = static_cast<jtag::flash::FlashPhase>(
+            program_flash_phase_.load());
+        const char* phase_label = "...";
+        switch (phase) {
+            case jtag::flash::FlashPhase::BRIDGE_LOAD: phase_label = "Loading BSCAN bridge"; break;
+            case jtag::flash::FlashPhase::ERASE:       phase_label = "Bulk erase (may take minutes)"; break;
+            case jtag::flash::FlashPhase::PROGRAM:     phase_label = "Programming"; break;
+            case jtag::flash::FlashPhase::VERIFY:      phase_label = "Verifying"; break;
+        }
+
+        if (running) {
+            const size_t done  = program_flash_done_.load();
+            const size_t total = program_flash_total_.load();
+            float frac = 0.0f;
+            char overlay[64];
+            if (total > 0) {
+                frac = static_cast<float>(done) / static_cast<float>(total);
+                snprintf(overlay, sizeof(overlay),
+                         "%zu / %zu KB", done / 1024, total / 1024);
+            } else {
+                // Indeterminate phases (BRIDGE_LOAD, ERASE)
+                snprintf(overlay, sizeof(overlay), "working...");
+            }
+            ImGui::TextUnformatted(phase_label);
+            ImGui::ProgressBar(frac, ImVec2(-1.0f, 22.0f), overlay);
+            ImGui::TextDisabled("Do not disconnect the device.");
+        } else {
+            const bool success = program_flash_success_.load();
+            if (success) {
+                ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1.0f),
+                                   "SUCCESS: Flash image written and verified.");
+                ImGui::TextDisabled("Power-cycle the board to boot from SPI.");
+            } else {
+                ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "FAILED");
+                std::string err;
+                {
+                    std::lock_guard<std::mutex> lk(program_flash_mutex_);
+                    err = program_flash_error_;
+                }
+                if (!err.empty()) {
+                    ImGui::Spacing();
+                    ImGui::TextWrapped("%s", err.c_str());
+                }
+            }
+            ImGui::Separator();
+            if (ImGui::Button("Close", ImVec2(120.0f, 0.0f))) {
+                if (program_flash_thread_.joinable()) program_flash_thread_.join();
+                if (success) {
+                    setStatusMessage("Flash programmed successfully.");
+                } else {
+                    std::lock_guard<std::mutex> lk(program_flash_mutex_);
+                    setStatusMessage("Flash programming failed: " +
+                                     program_flash_error_);
                 }
                 ImGui::CloseCurrentPopup();
             }

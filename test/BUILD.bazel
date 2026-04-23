@@ -118,3 +118,21 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "spi_flash_test",
+    srcs = ["spi_flash_test.cpp"],
+    deps = [
+        "//src/flash:spi_flash",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "mcs_parser_test",
+    srcs = ["mcs_parser_test.cpp"],
+    deps = [
+        "//src/flash:mcs_parser",
+        "@googletest//:gtest_main",
+    ],
+)
+

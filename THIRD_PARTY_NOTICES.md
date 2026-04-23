@@ -45,6 +45,16 @@ licenses.
     - `third_party/imgui/imgui-src/imstb_truetype.h`
   - License: MIT or public domain / Unlicense, as stated in each upstream file.
 
+## Optional runtime assets (not vendored)
+
+The SPI flash programming feature loads a small helper bitstream into the PL
+at runtime.  We do not ship this bitstream; users download it themselves:
+
+- quartiq/bscan_spi_bitstreams
+  - Source: <https://github.com/quartiq/bscan_spi_bitstreams>
+  - License: MIT
+  - See [assets/README.md](assets/README.md) for usage.
+
 ## Redistribution note
 
 If you redistribute binaries, review the obligations for LGPL-covered

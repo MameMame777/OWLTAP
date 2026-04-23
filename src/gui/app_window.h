@@ -75,6 +75,10 @@ private:
     void onProgramPl();
     void drawProgramPlModal();
 
+    // SPI flash programming (background thread)
+    void onProgramFlash();
+    void drawProgramFlashModal();
+
     // Portable file dialog helpers (Win32 on Windows)
     static std::string openFileDialog(const char* title, const char* filter);
     static std::string saveFileDialog(const char* title, const char* filter);
@@ -131,6 +135,19 @@ private:
     std::string program_pl_error_;   // written by thread; read only after running_ == false
     std::mutex program_pl_mutex_;
     std::thread program_pl_thread_;
+
+    // Flash programming state
+    bool program_flash_popup_requested_ = false;
+    std::atomic<bool> program_flash_running_{false};
+    std::atomic<int> program_flash_phase_{0};      // cast from FlashPhase
+    std::atomic<size_t> program_flash_done_{0};
+    std::atomic<size_t> program_flash_total_{0};
+    std::atomic<bool> program_flash_success_{false};
+    std::string program_flash_bin_path_;
+    std::string program_flash_bridge_path_;
+    std::string program_flash_error_;
+    std::mutex program_flash_mutex_;
+    std::thread program_flash_thread_;
 
     AppConfig config_;
 };

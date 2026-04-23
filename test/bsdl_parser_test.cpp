@@ -155,6 +155,79 @@ TEST(BSDLParserTest, GetOutputCells) {
     EXPECT_GE(output_cells.size(), 1u);
 }
 
+// A BSDL that uses the IEEE-standard "SAMPLE/PRELOAD" name instead of plain "SAMPLE".
+// Ensures CR-3 fix (sampleOpcode() searches both names) is not regressed.
+const char* kSamplePreloadBsdl = R"BSDL(
+entity DEVICE_SP is
+  port (IO : inout bit);
+  use STD_1149_1_2001.all;
+  attribute INSTRUCTION_LENGTH of DEVICE_SP : entity is 4;
+  attribute INSTRUCTION_OPCODE of DEVICE_SP : entity is
+    "BYPASS          (1111)," &
+    "EXTEST          (0000)," &
+    "SAMPLE/PRELOAD  (0001)";
+  attribute BOUNDARY_LENGTH of DEVICE_SP : entity is 1;
+  attribute BOUNDARY_REGISTER of DEVICE_SP : entity is
+    "0 (BC_1, IO, input, X)";
+end DEVICE_SP;
+)BSDL";
+
+TEST(BSDLParserTest, SamplePreloadOpcodeFound) {
+    BSDLParser parser;
+    auto dev = parser.parseString(kSamplePreloadBsdl);
+    ASSERT_NE(dev, nullptr) << "Parse error: " << parser.lastError();
+
+    // Plain "SAMPLE" must not exist in this BSDL.
+    EXPECT_FALSE(dev->getInstruction("SAMPLE").has_value());
+
+    // sampleOpcode() must still return the SAMPLE/PRELOAD opcode.
+    auto op = dev->sampleOpcode();
+    ASSERT_TRUE(op.has_value()) << "SAMPLE/PRELOAD opcode not found";
+    EXPECT_EQ(*op, 0x01u);  // binary 0001
+}
+
+TEST(BSDLParserTest, SampleOpcodeNotFoundWhenAbsent) {
+    BSDLParser parser;
+    // BSDL with no SAMPLE or SAMPLE/PRELOAD instruction at all.
+    const char* bsdl = R"BSDL(
+entity NO_SAMPLE is
+  port (IO : inout bit);
+  use STD_1149_1_2001.all;
+  attribute INSTRUCTION_LENGTH of NO_SAMPLE : entity is 2;
+  attribute INSTRUCTION_OPCODE of NO_SAMPLE : entity is
+    "BYPASS (11)," &
+    "EXTEST (00)";
+  attribute BOUNDARY_LENGTH of NO_SAMPLE : entity is 1;
+  attribute BOUNDARY_REGISTER of NO_SAMPLE : entity is
+    "0 (BC_1, IO, input, X)";
+end NO_SAMPLE;
+)BSDL";
+    auto dev = parser.parseString(bsdl);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_FALSE(dev->sampleOpcode().has_value());
+}
+
+TEST(BSDLParserTest, OversizeBoundaryLengthClamped) {
+    BSDLParser parser;
+    // boundary_length > kMaxBsrBits (65536) must be rejected.
+    const char* bsdl = R"BSDL(
+entity OVERSIZED is
+  port (IO : inout bit);
+  use STD_1149_1_2001.all;
+  attribute INSTRUCTION_LENGTH of OVERSIZED : entity is 2;
+  attribute INSTRUCTION_OPCODE of OVERSIZED : entity is "BYPASS (11)";
+  attribute BOUNDARY_LENGTH of OVERSIZED : entity is 70000;
+  attribute BOUNDARY_REGISTER of OVERSIZED : entity is
+    "0 (BC_1, IO, input, X)";
+end OVERSIZED;
+)BSDL";
+    auto dev = parser.parseString(bsdl);
+    ASSERT_NE(dev, nullptr);
+    // boundary_length must not exceed kMaxBsrBits.
+    EXPECT_LE(dev->boundary_length, 65536);
+    EXPECT_LE(static_cast<int>(dev->boundary_cells.size()), 65536);
+}
+
 TEST(BSDLParserTest, EmptyString) {
     BSDLParser parser;
     auto dev = parser.parseString("");

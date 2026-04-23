@@ -60,21 +60,32 @@ Verified hardware: Xilinx Zynq XA7Z020-CLG484 PL TAP + ARM DAP via FTDI FT4232H.
 
 ### Prerequisites
 
-| Tool | Version |
-|------|---------|
-| Bazelisk | any (downloads correct Bazel version) |
-| MSVC | 2022 (C++17) |
-| Python | 3.x (for Bazel scripts) |
+| Tool | Notes |
+|------|-------|
+| [Bazelisk](https://github.com/bazelbuild/bazelisk/releases) | Download `bazelisk-windows-amd64.exe`, rename to `bazelisk.exe`, place on `PATH` |
+| Visual Studio 2022 | **Desktop development with C++** workload required (MSVC v143, Windows SDK) |
+| Python 3.x | Required by Bazel host scripts; `python` must be on `PATH` |
+| Pillow (optional) | `pip install pillow` — only needed for the icon-embedding post-build step |
 
-libftdi1 and libusb-1.0 are vendored under `third_party/`.
+libftdi1 and libusb-1.0 are vendored under `third_party/`; no separate installation is needed for building.
 
-### Commands
+### Windows USB driver
+
+libusb requires a WinUSB-compatible driver bound to the FTDI adapter.
+Install [Zadig](https://zadig.akeo.ie/), select the FTDI interface used for JTAG (usually Interface 0 of the FT4232H), and install **WinUSB** or **libusbK**.
+The FTDI COM-port driver (VCP) must **not** be bound to that interface at the same time.
+
+### Build commands
 
 ```powershell
+# Clone and enter the repository
+git clone https://github.com/<your-username>/jtag-fpga-viewer.git
+cd jtag-fpga-viewer
+
 # Build the viewer
 bazelisk build //src:jtag_viewer
 
-# Embed taskbar icon into the .exe (Windows only, requires Pillow)
+# Embed the taskbar icon (requires Pillow; run once after each clean build)
 Set-ItemProperty bazel-bin/src/jtag_viewer.exe -Name IsReadOnly -Value $false
 python tools/embed_icon.py bazel-bin/src/jtag_viewer.exe docs/icon.png
 
@@ -89,6 +100,12 @@ bazelisk build //src/tools:jtag_diag
 ```
 
 The binary is produced at `bazel-bin/src/jtag_viewer.exe`.
+
+### BSDL files
+
+BSDL/BSD files for your target device are **not included** in this repository.
+Obtain them from your device vendor (e.g. Xilinx/AMD downloads, device datasheet package)
+and load them at runtime via **Device → Load BSDL**.
 
 ## Usage
 
@@ -115,6 +132,47 @@ highz LED0
 apply
 ```
 
+### Programming the PL bitstream (volatile)
+
+**Tools → Program Bitstream...** writes a `.bit` / `.bin` file directly into
+the Zynq PL via JTAG (UG470 configuration sequence: `JPROGRAM` →
+`CFG_IN` → `JSTART` → `DONE`).  Lost on power cycle.
+
+Command-line equivalent:
+
+```
+bazel-bin/src/tools/pl_program.exe --bit design.bit
+```
+
+### Programming the SPI configuration ROM (non-volatile)
+
+**Tools → Program Flash (SPI ROM)...** writes a flash image into the Micron
+MT25QL128 so the board boots the design after power-cycle.  The workflow:
+
+1. Generate a raw SPI image from Vivado:
+
+   ```tcl
+   write_cfgmem -force -format BIN -interface SPIx1 -size 16 \
+                -loadbit "up 0x00000000 design.bit" design.bin
+   ```
+
+2. Download the BSCAN SPI bridge bitstream from
+   [quartiq/bscan_spi_bitstreams](https://github.com/quartiq/bscan_spi_bitstreams)
+   — for XC7Z020 use `bscan_spi_xc7z020.bit`.  See [assets/README.md](assets/README.md).
+
+3. In the GUI, select **Tools → Program Flash (SPI ROM)...**, pick the bridge
+   `.bit` first, then your design `.bin`.  The tool loads the bridge into the
+   PL, bulk-erases the flash, programs it page-by-page, and verifies the
+   read-back.
+
+Command-line equivalent:
+
+```
+bazel-bin/src/tools/flash_program.exe --bridge bscan_spi_xc7z020.bit --bin design.bin
+```
+
+Only MT25QL128 (JEDEC `0x20BA18`, 16 MB) is currently supported.
+
 ## Project Structure
 
 ```
@@ -122,11 +180,13 @@ src/
   boundary_scan/   -- BSR staging free functions + PinDriver
   bsdl/            -- BSDL lexer, parser, model
   capture/         -- CaptureEngine ring buffer + trigger logic
+  config/          -- PL JTAG configuration (UG470 sequencer)
+  flash/           -- SPI config ROM programming via BSCAN bridge
   ftdi/            -- libftdi1 wrapper (FtdiDevice) + MPSSE buffer
   gui/             -- ImGui application window, panels, dialogs
   jtag/            -- JtagChain + TAP controller FSM
   script/          -- ScriptEngine (set/expect/apply/highz)
-  tools/           -- jtag_diag CLI diagnostic tool
+  tools/           -- jtag_diag, pl_program, flash_program CLI tools
 test/              -- Google Test unit tests (no hardware required)
 third_party/       -- vendored libftdi1, libusb-1.0, GLFW, ImGui, ImPlot
 docs/              -- architecture references, implementation plans
@@ -144,6 +204,7 @@ Unit tests cover all hardware-independent logic:
 //test:scanner_test        -- Boundary-scan decoder
 //test:pin_driver_test     -- BSR staging free functions
 //test:script_engine_test  -- Script parser + executor
+//test:spi_flash_test      -- MT25Q SPI flash command encoding
 ```
 
 Hardware-dependent paths (`FtdiDevice`, `JtagChain::readBSR/writeBSR`) require a
@@ -151,4 +212,8 @@ physical FTDI adapter and are exercised manually or via `jtag_diag`.
 
 ## License
 
-*To be determined.*
+Original source code: **MIT License** — see [LICENSE](LICENSE).
+
+This project vendors third-party libraries under separate licenses.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for details.
+License texts for LGPL-covered components are in [THIRD_PARTY_LICENSES/](THIRD_PARTY_LICENSES/).

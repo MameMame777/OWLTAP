@@ -23,3 +23,15 @@ cc_binary(
         "//src/jtag:tap_controller",
     ],
 )
+
+cc_binary(
+    name = "flash_program",
+    srcs = ["flash_program.cpp"],
+    deps = [
+        "//src/flash:flash_programmer",
+        "//src/ftdi:ftdi_device",
+        "//src/gui:app_config",
+        "//src/jtag:jtag_chain",
+        "//src/jtag:tap_controller",
+    ],
+)

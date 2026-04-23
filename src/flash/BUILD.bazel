@@ -1,0 +1,46 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "flash_jtag_bridge",
+    srcs = ["flash_jtag_bridge.cpp"],
+    hdrs = ["flash_jtag_bridge.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/config:pl_config",
+        "//src/jtag:jtag_chain",
+    ],
+)
+
+cc_library(
+    name = "spi_flash",
+    srcs = ["spi_flash.cpp"],
+    hdrs = ["spi_flash.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":flash_jtag_bridge",
+    ],
+)
+
+cc_library(
+    name = "mcs_parser",
+    srcs = ["mcs_parser.cpp"],
+    hdrs = ["mcs_parser.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":spi_flash",
+    ],
+)
+
+cc_library(
+    name = "flash_programmer",
+    srcs = ["flash_programmer.cpp"],
+    hdrs = ["flash_programmer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":flash_jtag_bridge",
+        ":mcs_parser",
+        ":spi_flash",
+        "//src/config:pl_config",
+        "//src/jtag:jtag_chain",
+    ],
+)

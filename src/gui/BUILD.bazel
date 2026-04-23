@@ -57,6 +57,7 @@ cc_library(
         "//src/capture:capture_engine",
         "//src/capture:trigger",
         "//src/config:pl_config",
+        "//src/flash:flash_programmer",
         "//src/ftdi:ftdi_device",
         "//src/jtag:jtag_chain",
         "//src/jtag:tap_controller",

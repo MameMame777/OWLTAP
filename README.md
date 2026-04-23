@@ -117,6 +117,25 @@ and load them at runtime via **Device → Load BSDL**.
 6. **Capture** → **Start** to begin waveform acquisition.
 7. **File** → **Export VCD** to save captured waveforms.
 
+### Sampling rate and signal bandwidth
+
+Boundary-scan capture works by repeatedly shifting the 1077-bit BSR of the
+XC7Z020 through the JTAG TAP.  The attainable sample rate is limited by two
+factors:
+
+| Factor | Contribution |
+|--------|-------------|
+| JTAG clock (default 6 MHz) + IR/DR overhead | ~5.5 kHz theoretical max |
+| USB bulk-transfer round-trip latency (~250–500 µs) | reduces to **~1–2 kHz** in practice |
+
+> **Rule of thumb**: signals above ~500 Hz–1 kHz will alias and cannot be
+> captured faithfully.  Boundary scan is suited for slow control signals,
+> power-up sequencing, and bus idle/active states — not high-speed clocks or
+> fast GPIO toggles.
+
+For high-speed signal capture, use the **Xilinx Integrated Logic Analyser
+(ILA)** core instantiated inside your PL design.
+
 ### Script Engine
 
 Create a plain-text script file and load it via **File** → **Run Script**:

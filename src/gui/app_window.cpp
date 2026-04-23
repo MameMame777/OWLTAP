@@ -1203,6 +1203,19 @@ void AppWindow::refreshFromCapture() {
         snprintf(buf, sizeof(buf), "Capture complete. %zu samples. %.1f Hz.",
                  samples.size(), capture_engine_->effectiveSampleRate());
         setStatusMessage(buf);
+    } else if (capturing_ &&
+               capture_engine_->trigger().mode() == jtag::TriggerMode::FREE_RUN &&
+               !WaveformView::isAutoScroll()) {
+        // FREE_RUN without auto-scroll: waveform is frozen in view, so show
+        // a live status indicator so the user knows acquisition is still running.
+        static const char* kDots[] = { ".", "..", "...", "...." };
+        static int dot_idx = 0;
+        dot_idx = (dot_idx + 1) % 4;
+        char buf[128];
+        snprintf(buf, sizeof(buf), "Capturing%s  %zu samples  %.1f Hz",
+                 kDots[dot_idx], samples.size(),
+                 capture_engine_->effectiveSampleRate());
+        setStatusMessage(buf);
     }
 }
 

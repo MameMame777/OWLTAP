@@ -195,6 +195,17 @@ WaveformView::DrawActions WaveformView::draw(bool can_capture, bool can_stop) {
     if (!can_capture) {
         ImGui::EndDisabled();
     }
+
+    // Capturing indicator (FREE_RUN without auto-scroll: view is frozen but
+    // acquisition is still live, so show a visible in-panel animation).
+    if (can_stop && !auto_scroll_) {
+        static const char* kDots[] = { ".", "..", "...", "...." };
+        int idx = static_cast<int>(ImGui::GetTime() * 4.0) % 4;
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f),
+                           "Capturing%s", kDots[idx]);
+    }
+
     ImGui::Separator();
 
     std::lock_guard<std::mutex> lock(mutex_);

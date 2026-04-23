@@ -51,6 +51,9 @@ public:
     /// Reset the waveform viewport when the next acquisition data arrives.
     static void requestResetView();
 
+    /// Returns true when Auto Scroll is enabled.
+    static bool isAutoScroll() { return auto_scroll_; }
+
     /// Set protocol decoder annotations to overlay on the bottom of the plot area.
     static void setAnnotations(const std::vector<jtag::protocol::DecodedFrame>& frames);
 

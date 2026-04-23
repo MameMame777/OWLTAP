@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/icon.png" alt="JTAG Waveform Viewer" width="160"/>
+  <img src="docs/icon.png" alt="OwlTAP" width="160"/>
 </p>
 
-<h1 align="center">JTAG FPGA Waveform Viewer</h1>
+<h1 align="center">OwlTAP</h1>
 
 <p align="center">
   A desktop JTAG boundary-scan diagnostic and waveform capture tool for FPGA/SoC devices,
@@ -79,8 +79,8 @@ The FTDI COM-port driver (VCP) must **not** be bound to that interface at the sa
 
 ```powershell
 # Clone and enter the repository
-git clone https://github.com/MameMame777/jtag-fpga-viewer.git
-cd jtag-fpga-viewer
+git clone https://github.com/MameMame777/OwlTAP.git
+cd OwlTAP
 
 # Build the viewer
 bazelisk build //src:jtag_viewer

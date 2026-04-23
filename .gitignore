@@ -12,6 +12,8 @@ imgui.ini
 
 # Xilinx flash image artifacts (user-generated; keep out of source tree)
 *.mcs
+*.prm
+*.bit
 
 # Local upstream source archives; extracted vendor trees are tracked instead
 third_party/libusb/libusb-1.0.27-src.zip

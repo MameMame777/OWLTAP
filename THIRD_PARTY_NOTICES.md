@@ -61,22 +61,14 @@ licenses.
     - `third_party/imgui/imgui-src/imstb_truetype.h`
   - License: MIT or public domain / Unlicense, as stated in each upstream file.
 
-## User-generated Xilinx artifacts
+## User-generated Xilinx artifacts (not included)
 
-The following files in this repository are user-generated outputs of the
-Xilinx / AMD Vivado Design Suite, used as example designs for hardware
-verification and documentation:
-
-- `docs/AXIUART_Top.bit`
-- `docs/blink_speed.bit`
-- `docs/design_1_wrapper.bit`
-- `blink_speed.prm`
-
-These are considered user-generated artifacts (user HDL compiled with
-Vivado) and are not part of the MIT-licensed original source of this
-project. They are provided only as reference assets. Users generating
-their own equivalent outputs should refer to the end-user license terms
-of the Xilinx / AMD tool they use.
+This repository does not ship any Vivado-generated bitstream (`.bit`),
+flash image (`.mcs`), or flash report (`.prm`) files. Those are
+user-generated outputs of the Xilinx / AMD Vivado Design Suite and are
+excluded from the source tree (see `.gitignore`). Users producing their
+own equivalent outputs should refer to the end-user license terms of the
+Xilinx / AMD tool they use.
 
 ## Optional runtime assets (not vendored)
 

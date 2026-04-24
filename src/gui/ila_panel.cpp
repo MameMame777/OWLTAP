@@ -79,6 +79,34 @@ void IlaPanel::resetSignalDefs() {
     signals_.push_back(d);
 }
 
+std::vector<IlaSignalConfig> IlaPanel::exportSignalConfigs() const {
+    std::vector<IlaSignalConfig> out;
+    out.reserve(signals_.size());
+    for (const auto& s : signals_) {
+        IlaSignalConfig c;
+        c.name = s.name;  // char[] -> string
+        c.hi   = s.hi;
+        c.lo   = s.lo;
+        c.fmt  = s.fmt;
+        out.push_back(std::move(c));
+    }
+    return out;
+}
+
+void IlaPanel::importSignalConfigs(const std::vector<IlaSignalConfig>& cfgs) {
+    if (cfgs.empty()) return;
+    signals_.clear();
+    signals_.reserve(cfgs.size());
+    for (const auto& c : cfgs) {
+        IlaSignalDef d{};
+        std::snprintf(d.name, sizeof(d.name), "%s", c.name.c_str());
+        d.hi  = c.hi;
+        d.lo  = c.lo;
+        d.fmt = c.fmt;
+        signals_.push_back(d);
+    }
+}
+
 void IlaPanel::setChain(jtag::JtagChain* chain, int device_index) {
     driver_.reset();
     backend_.reset();

@@ -416,6 +416,8 @@ void AppWindow::applyTheme() {
 AppWindow::~AppWindow() {
     // Save config before destroying
     config_.selected_pins = SignalPanel::selectedSignals();
+    config_.buses         = SignalPanel::buses();
+    config_.ila_signals   = ila_panel_.exportSignalConfigs();
     config_.save("cfg.json");
 
     onDisconnect();
@@ -596,6 +598,8 @@ void AppWindow::onConnect() {
         } else {
             ila_panel_.setChain(chain_.get(), 0);
         }
+        // Apply persisted signal-lane definitions (overrides probe() defaults)
+        ila_panel_.importSignalConfigs(config_.ila_signals);
     }
 
     // Build device info string
@@ -1388,6 +1392,9 @@ void AppWindow::onLoadConfig() {
     // Restore bus definitions
     SignalPanel::setBuses(config_.buses);
 
+    // Restore ILA signal lane definitions (no-op if empty)
+    ila_panel_.importSignalConfigs(config_.ila_signals);
+
     // Restore XDC aliases
     if (!config_.xdc_path.empty()) {
         onLoadXdc(config_.xdc_path);
@@ -1449,6 +1456,7 @@ void AppWindow::onSaveConfig() {
 
     config_.selected_pins = SignalPanel::selectedSignals();
     config_.buses         = SignalPanel::buses();
+    config_.ila_signals   = ila_panel_.exportSignalConfigs();
     if (config_.save(path)) {
         setStatusMessage("Config saved: " + path);
     } else {

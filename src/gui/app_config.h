@@ -21,6 +21,15 @@ struct BusDefinition {
     BusFormat format = BusFormat::HEX;
 };
 
+/// Persistent definition of an ILA signal lane (bit-field slice of the
+/// captured data word).  hi/lo are inclusive 0-based bit indices.
+struct IlaSignalConfig {
+    std::string name;
+    int         hi  = 0;
+    int         lo  = 0;
+    BusFormat   fmt = BusFormat::HEX;
+};
+
 /// Persistent application settings saved to/loaded from cfg.json.
 struct AppConfig {
     // Device connection
@@ -39,6 +48,9 @@ struct AppConfig {
 
     // Bus definitions
     std::vector<BusDefinition> buses;
+
+    // ILA signal lane definitions (per-lane bit-field slicing)
+    std::vector<IlaSignalConfig> ila_signals;
 
     // XDC pin alias file (optional)
     std::string xdc_path;

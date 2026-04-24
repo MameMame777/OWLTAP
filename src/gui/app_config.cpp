@@ -154,6 +154,46 @@ static std::vector<BusDefinition> jsonBusArray(const std::string& json,
     return result;
 }
 
+// Parse an array of ILA signal config objects from a JSON string.
+// Expected format: [{"name":"data[31:16]","hi":31,"lo":16,"fmt":"HEX"}, ...]
+static std::vector<IlaSignalConfig> jsonIlaSignalArray(const std::string& json,
+                                                       const std::string& key) {
+    std::vector<IlaSignalConfig> result;
+    std::string search = "\"" + key + "\"";
+    size_t p = json.find(search);
+    if (p == std::string::npos) return result;
+    p = json.find('[', p + search.size());
+    if (p == std::string::npos) return result;
+    p++;  // skip '['
+
+    while (p < json.size()) {
+        while (p < json.size() && (json[p] == ' ' || json[p] == '\t' ||
+               json[p] == '\n' || json[p] == '\r' || json[p] == ',')) p++;
+        if (p >= json.size() || json[p] == ']') break;
+        if (json[p] != '{') { p++; continue; }
+
+        size_t obj_start = p;
+        size_t obj_end = json.find('}', obj_start + 1);
+        if (obj_end == std::string::npos) break;
+        std::string obj = json.substr(obj_start, obj_end - obj_start + 1);
+        p = obj_end + 1;
+
+        IlaSignalConfig s;
+        s.name = jsonString(obj, "name");
+        if (s.name.empty()) continue;
+        s.hi = static_cast<int>(jsonInt(obj, "hi", 0));
+        s.lo = static_cast<int>(jsonInt(obj, "lo", 0));
+
+        std::string fmt_str = jsonString(obj, "fmt");
+        if (fmt_str == "DEC") s.fmt = BusFormat::DEC;
+        else if (fmt_str == "BIN") s.fmt = BusFormat::BIN;
+        else s.fmt = BusFormat::HEX;
+
+        result.push_back(std::move(s));
+    }
+    return result;
+}
+
 // ── AppConfig implementation ─────────────────────────────────────────────────
 
 bool AppConfig::save(const std::string& path) const {
@@ -199,6 +239,24 @@ bool AppConfig::save(const std::string& path) const {
     if (!buses.empty()) f << "  ";
     f << "],\n";
 
+    // ILA signal lane definitions
+    f << "  \"ila_signals\": [";
+    for (size_t i = 0; i < ila_signals.size(); i++) {
+        const auto& s = ila_signals[i];
+        if (i == 0) f << "\n";
+        const char* fmt_str =
+            (s.fmt == BusFormat::DEC) ? "DEC" :
+            (s.fmt == BusFormat::BIN) ? "BIN" : "HEX";
+        f << "    {\"name\":\"" << jsonEscape(s.name) << "\","
+          << "\"hi\":" << s.hi << ","
+          << "\"lo\":" << s.lo << ","
+          << "\"fmt\":\"" << fmt_str << "\"}";
+        if (i + 1 < ila_signals.size()) f << ",";
+        f << "\n";
+    }
+    if (!ila_signals.empty()) f << "  ";
+    f << "],\n";
+
     // XDC pin alias file
     f << "  \"xdc_path\": \"" << jsonEscape(xdc_path) << "\"\n";
     f << "}\n";
@@ -223,6 +281,7 @@ AppConfig AppConfig::load(const std::string& path) {
     cfg.bsdl_device_index = static_cast<int>(jsonInt(json, "bsdl_device_index",      0));
     cfg.selected_pins     = jsonStringArray(json, "selected_pins");
     cfg.buses             = jsonBusArray(json, "buses");
+    cfg.ila_signals       = jsonIlaSignalArray(json, "ila_signals");
     cfg.xdc_path          = jsonString(json, "xdc_path");
     return cfg;
 }

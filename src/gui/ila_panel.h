@@ -76,6 +76,15 @@ public:
     bool isVisible() const { return visible_; }
     void setVisible(bool v) { visible_ = v; }
 
+    // ── Signal lane persistence (cfg.json round-trip) ───────────────────────
+
+    /// Export current signal-lane definitions as persistable configs.
+    std::vector<IlaSignalConfig> exportSignalConfigs() const;
+
+    /// Replace lane definitions with persisted configs (e.g. from cfg.json).
+    /// If `cfgs` is empty, the current definitions are kept untouched.
+    void importSignalConfigs(const std::vector<IlaSignalConfig>& cfgs);
+
 private:
     void doArm();
     void doStop();

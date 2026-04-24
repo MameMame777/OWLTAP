@@ -135,10 +135,27 @@ module ila_bscane2_top #(
     // ------------------------------------------------------------------
     // CONFIG register value (read-only; see ila_tap.sv for bit layout)
     // ------------------------------------------------------------------
+    // Phase 1: fixed single-entry SIG_DEF ROM (Phase 2 will parameterize).
+    localparam logic [3:0]  SIG_COUNT_VAL = 4'd1;
+
+    // SIG_DEF word format (read-only, 32 bits):
+    //   [31:28] fmt[3:0]  (0=HEX 1=DEC 2=BIN; future: SIGNED/TIME)
+    //   [27:24] reserved  = 4'h0
+    //   [23:16] hi[7:0]   (inclusive MSB index, 0-based)
+    //   [15: 8] lo[7:0]   (inclusive LSB index, 0-based)
+    //   [ 7: 0] name_idx  (0xFF = host auto-generates "data[hi:lo]")
+    localparam logic [31:0] SIG_DEF_VAL = {
+        4'h0,                       // fmt = HEX
+        4'h0,                       // reserved
+        8'(DATA_W - 1),             // hi
+        8'd0,                       // lo
+        8'hFF                       // name_idx = none
+    };
+
     localparam logic [31:0] CONFIG_VAL = {
         8'h01,
         4'(NUM_CH),
-        4'h0,
+        SIG_COUNT_VAL,
         6'(DATA_W - 1),
         2'h0,
         8'(ADDR_W)
@@ -152,6 +169,7 @@ module ila_bscane2_top #(
         case (stored_ir)
             5'h01:   capture_data = IDCODE_VAL;
             5'h02:   capture_data = CONFIG_VAL;
+            5'h03:   capture_data = SIG_DEF_VAL;
             5'h09:   capture_data = {{(DATA_W-3){1'b0}},
                                       sts_full_tck, sts_triggered_tck,
                                       sts_armed_tck};

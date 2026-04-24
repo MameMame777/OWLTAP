@@ -108,6 +108,7 @@ module ila_tap #(
 
     localparam logic [IR_W-1:0] IR_IDCODE      = 5'h01;
     localparam logic [IR_W-1:0] IR_CONFIG      = 5'h02;
+    localparam logic [IR_W-1:0] IR_SIG_DEF     = 5'h03;
     localparam logic [IR_W-1:0] IR_CTRL        = 5'h08;
     localparam logic [IR_W-1:0] IR_STATUS      = 5'h09;
     localparam logic [IR_W-1:0] IR_TRIG_MASK   = 5'h0A;
@@ -139,15 +140,32 @@ module ila_tap #(
     // CONFIG register (read-only)
     //   [31:24] VERSION    = 8'h01
     //   [23:20] NUM_CH
-    //   [19:16] RESERVED   = 4'h0
+    //   [19:16] SIG_COUNT  = number of signal-lane slices reported by SIG_DEF
     //   [15:10] DATA_W - 1 (6 bits, value range 1..64)
     //   [ 9: 8] RESERVED   = 2'h0
     //   [ 7: 0] ADDR_W     (DEPTH = 1 << ADDR_W)
     // ------------------------------------------------------------------
+    // Phase 1: fixed single-entry SIG_DEF ROM (Phase 2 will parameterize).
+    localparam logic [3:0]  SIG_COUNT_VAL = 4'd1;
+
+    // SIG_DEF word format (read-only, 32 bits):
+    //   [31:28] fmt[3:0]  (0=HEX 1=DEC 2=BIN; future: SIGNED/TIME)
+    //   [27:24] reserved  = 4'h0
+    //   [23:16] hi[7:0]   (inclusive MSB index, 0-based)
+    //   [15: 8] lo[7:0]   (inclusive LSB index, 0-based)
+    //   [ 7: 0] name_idx  (0xFF = host auto-generates "data[hi:lo]")
+    localparam logic [31:0] SIG_DEF_VAL = {
+        4'h0,                       // fmt = HEX
+        4'h0,                       // reserved
+        8'(DATA_W - 1),             // hi
+        8'd0,                       // lo
+        8'hFF                       // name_idx = none
+    };
+
     localparam logic [31:0] CONFIG_VAL = {
         8'h01,
         4'(NUM_CH),
-        4'h0,
+        SIG_COUNT_VAL,
         6'(DATA_W - 1),
         2'h0,
         8'(ADDR_W)
@@ -159,6 +177,7 @@ module ila_tap #(
     logic                bypass_shift;
     logic [31:0]         idcode_shift;
     logic [31:0]         config_shift;
+    logic [31:0]         sigdef_shift;
     logic [3:0]          ctrl_shift;      // {FORCE_TRIG, RESET, STOP, ARM}
     logic [7:0]          status_shift;
     logic [DATA_W-1:0]   mask_shift,  mask_reg;
@@ -185,6 +204,7 @@ module ila_tap #(
             bypass_shift      <= 1'b0;
             idcode_shift      <= IDCODE_VAL;
             config_shift      <= CONFIG_VAL;
+            sigdef_shift      <= SIG_DEF_VAL;
             ctrl_shift        <= '0;
             status_shift      <= '0;
             mask_shift        <= '0;
@@ -211,6 +231,7 @@ module ila_tap #(
                 unique case (ir_latched)
                     IR_IDCODE:      idcode_shift <= IDCODE_VAL;
                     IR_CONFIG:      config_shift <= CONFIG_VAL;
+                    IR_SIG_DEF:     sigdef_shift <= SIG_DEF_VAL;
                     IR_STATUS:      status_shift <= {5'b0, sts_full,
                                                      sts_triggered, sts_armed};
                     IR_TRIG_MASK:   mask_shift   <= mask_reg;
@@ -226,6 +247,7 @@ module ila_tap #(
                 unique case (ir_latched)
                     IR_IDCODE:      idcode_shift <= {tdi, idcode_shift[31:1]};
                     IR_CONFIG:      config_shift <= {tdi, config_shift[31:1]};
+                    IR_SIG_DEF:     sigdef_shift <= {tdi, sigdef_shift[31:1]};
                     IR_STATUS:      status_shift <= {tdi, status_shift[7:1]};
                     IR_TRIG_MASK:   mask_shift   <= {tdi, mask_shift[DATA_W-1:1]};
                     IR_TRIG_VAL:    val_shift    <= {tdi, val_shift[DATA_W-1:1]};
@@ -271,6 +293,7 @@ module ila_tap #(
             unique case (ir_latched)
                 IR_IDCODE:      tdo_d = idcode_shift[0];
                 IR_CONFIG:      tdo_d = config_shift[0];
+                IR_SIG_DEF:     tdo_d = sigdef_shift[0];
                 IR_STATUS:      tdo_d = status_shift[0];
                 IR_TRIG_MASK:   tdo_d = mask_shift[0];
                 IR_TRIG_VAL:    tdo_d = val_shift[0];

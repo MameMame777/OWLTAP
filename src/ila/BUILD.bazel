@@ -1,0 +1,34 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "ila_tap_backend",
+    srcs = ["ila_tap_backend.cpp"],
+    hdrs = ["ila_tap_backend.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/jtag:jtag_chain",
+        "//src/jtag:tap_controller",
+    ],
+)
+
+cc_library(
+    name = "ila_driver",
+    srcs = ["ila_driver.cpp"],
+    hdrs = ["ila_driver.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ila_tap_backend",
+    ],
+)
+
+cc_library(
+    name = "bscane_ila_tap_backend",
+    srcs = ["bscane_ila_tap_backend.cpp"],
+    hdrs = ["bscane_ila_tap_backend.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ila_tap_backend",
+        "//src/jtag:jtag_chain",
+        "//src/jtag:tap_controller",
+    ],
+)

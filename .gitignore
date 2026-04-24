@@ -24,3 +24,24 @@ third_party/libftdi/libftdi1-1.5.tar.bz2
 Thumbs.db
 build.log
 build_run.log
+
+# DSIM simulator artifacts
+dsim.log
+dsim.env
+dsim_work/
+metrics.db
+tr_db.log
+hdl/ila/sim/exec/logs/
+hdl/ila/sim/exec/logs_bscane2/
+hdl/ila/sim/exec/wave/
+hdl/ila/sim/exec/wave_bscane2/
+
+# Vivado artifacts
+vivado.log
+vivado.jou
+vivado*.backup.log
+vivado*.backup.jou
+*.str
+.Xil/
+hdl/ila/examples/*/vivado_proj/
+hdl/ila/examples/*/build_bitstream.log

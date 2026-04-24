@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <cfloat>
+#include <chrono>
 #include <cstring>
 #include <cstdio>
 #include <fstream>
@@ -30,6 +31,7 @@
 #include "debug_log_panel.h"
 #include "device_dialog.h"
 #include "hex_panel.h"
+#include "ila_panel.h"
 #include "interconnect_panel.h"
 #include "protocol_panel.h"
 #include "signal_panel.h"
@@ -476,6 +478,7 @@ void AppWindow::run() {
         drawPinControlPanel();
         drawScriptRunnerPanel();
         drawInterconnectPanel();
+        ila_panel_.draw();
         DebugLogPanel::draw(status_text_);
 
         // Device dialog
@@ -576,6 +579,25 @@ void AppWindow::onConnect() {
 
     connected_ = true;
 
+    // Attach ILA panel to chain.
+    // If a Zynq-7000 PL Config TAP is present (IDCODE[27:0] == 0x03727093),
+    // use BscaneIlaTapBackend targeting that device; otherwise default to
+    // ChainIlaTapBackend at device 0 (dedicated ILA TAP in chain).
+    {
+        int bscane_idx = -1;
+        for (const auto& dev : chain_->devices()) {
+            if ((dev.idcode & 0x0FFFFFFFu) == 0x03727093u) {
+                bscane_idx = dev.position;
+                break;
+            }
+        }
+        if (bscane_idx >= 0) {
+            ila_panel_.setBscaneChain(chain_.get(), bscane_idx);
+        } else {
+            ila_panel_.setChain(chain_.get(), 0);
+        }
+    }
+
     // Build device info string
     char buf[256];
     snprintf(buf, sizeof(buf), "Connected: %d device(s) in chain", count);
@@ -608,6 +630,7 @@ void AppWindow::onDisconnect() {
     scanner_.reset();
     chain_scanners_.clear();
     chain_drivers_.clear();
+    ila_panel_.setChain(nullptr, 0);
     chain_.reset();
     tap_.reset();
     if (ftdi_ && ftdi_->isOpen()) {
@@ -1900,6 +1923,11 @@ void AppWindow::buildMenuBar() {
             if (ImGui::MenuItem("Protocol Analyzer...", nullptr,
                                 ProtocolPanel::isVisible())) {
                 ProtocolPanel::setVisible(!ProtocolPanel::isVisible());
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Internal Logic Analyzer...", nullptr,
+                                ila_panel_.isVisible(), connected_)) {
+                ila_panel_.setVisible(!ila_panel_.isVisible());
             }
             ImGui::EndMenu();
         }

@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "app_config.h"
+#include "ila_panel.h"
 #include "src/boundary_scan/pin_driver.h"
 #include "src/boundary_scan/scanner.h"
 #include "src/capture/capture_engine.h"
@@ -100,6 +101,8 @@ private:
     std::unique_ptr<jtag::Scanner> scanner_;
     std::unique_ptr<jtag::PinDriver> pin_driver_;
     std::unique_ptr<jtag::CaptureEngine> capture_engine_;
+
+    IlaPanel ila_panel_;
 
     bool connected_ = false;
     bool capturing_ = false;

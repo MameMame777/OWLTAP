@@ -1,0 +1,9 @@
+{
+    "tests": [
+        "ila_tap_smoke_test",
+        "ila_config_read_test",
+        "ila_trigger_match_test",
+        "ila_prepost_split_test",
+        "ila_chain_bypass_test"
+    ]
+}

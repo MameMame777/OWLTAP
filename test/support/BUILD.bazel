@@ -1,0 +1,11 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "mock_ila_tap",
+    hdrs = ["mock_ila_tap.h"],
+    visibility = ["//test:__subpackages__"],
+    deps = [
+        "//src/ila:ila_driver",
+        "//src/ila:ila_tap_backend",
+    ],
+)

@@ -136,3 +136,13 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "ila_driver_test",
+    srcs = ["ila_driver_test.cpp"],
+    deps = [
+        "//src/ila:ila_driver",
+        "//test/support:mock_ila_tap",
+        "@googletest//:gtest_main",
+    ],
+)
+

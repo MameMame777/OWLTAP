@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 
+#include "app_config.h"
 #include "src/ila/bscane_ila_tap_backend.h"
 #include "src/ila/ila_driver.h"
 #include "src/ila/ila_tap_backend.h"
@@ -19,6 +20,27 @@ class JtagChain;
 } // namespace jtag
 
 namespace jtag::gui {
+
+/// Describes a named bit-field slice of the ILA captured data word.
+///
+/// hi and lo are inclusive bit indices (0 = LSB).  When width() == 1 the lane
+/// is rendered as a digital step-function; wider fields use bus-block style.
+struct IlaSignalDef {
+    char      name[32] = {};       ///< Display label (null-terminated)
+    int       hi  = 31;            ///< MSB index (inclusive, 0-based)
+    int       lo  = 0;             ///< LSB index (inclusive, 0-based)
+    BusFormat fmt = BusFormat::HEX;
+
+    int width() const { return hi - lo + 1; }
+
+    /// Extract this field's value from a raw 32-bit sample word.
+    uint32_t extract(uint32_t sample) const {
+        const int w = width();
+        if (w <= 0 || lo < 0) return 0u;
+        const uint32_t mask = (w >= 32) ? 0xFFFF'FFFFu : ((1u << w) - 1u);
+        return (sample >> lo) & mask;
+    }
+};
 
 /// Dockable ImGui panel for the Internal Logic Analyzer IP.
 ///
@@ -61,7 +83,9 @@ private:
     void doReset();
     void doRead();
     void pollStatus();
-    void drawWaveform();  // embedded ImPlot chart
+    void drawWaveform();      // multi-lane ImPlot chart
+    void drawSignalEditor();   // collapsible lane-definition table
+    void resetSignalDefs();    // populate default from IlaCaps.data_w
 
     bool driverOk() const { return driver_ != nullptr; }
 
@@ -85,7 +109,10 @@ private:
     bool                  has_samples_ = false;
 
     // Waveform plot data (x = time in ns; y not needed for bus display)
-    std::vector<double>  wave_x_;
+    std::vector<double>    wave_x_;
+
+    // Signal lane definitions (auto-populated from probe(); user-editable)
+    std::vector<IlaSignalDef> signals_;
 
     // Poll timer
     double last_poll_time_ = 0.0;

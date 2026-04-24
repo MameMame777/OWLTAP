@@ -31,6 +31,31 @@ static void statusLed(const char* label, bool on, ImVec4 color_on) {
     ImGui::PopStyleColor(3);
 }
 
+/// Format a sample value for display inside a bus lane block.
+static void formatSampleValue(char* buf, size_t sz,
+                               uint32_t val, BusFormat fmt, int width) {
+    switch (fmt) {
+        case BusFormat::DEC:
+            std::snprintf(buf, sz, "%u", val);
+            break;
+        case BusFormat::BIN:
+            if (width <= 8) {
+                char bin[9];
+                for (int k = 0; k < width; k++)
+                    bin[width - 1 - k] = ((val >> k) & 1u) ? '1' : '0';
+                bin[width] = '\0';
+                std::snprintf(buf, sz, "0b%s", bin);
+                break;
+            }
+            [[fallthrough]];
+        case BusFormat::HEX: {
+            const int nib = (width + 3) / 4;
+            std::snprintf(buf, sz, "0x%0*X", nib, val);
+            break;
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Constructor / setChain
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,6 +66,18 @@ IlaPanel::IlaPanel() {
 }
 
 IlaPanel::~IlaPanel() = default;
+
+void IlaPanel::resetSignalDefs() {
+    signals_.clear();
+    const int dw = driverOk() ? driver_->dataWidth()
+                              : jtag::ila::IlaDriver::kDataWidth;
+    IlaSignalDef d{};
+    std::snprintf(d.name, sizeof(d.name), "data[%d:0]", dw - 1);
+    d.hi  = dw - 1;
+    d.lo  = 0;
+    d.fmt = BusFormat::HEX;
+    signals_.push_back(d);
+}
 
 void IlaPanel::setChain(jtag::JtagChain* chain, int device_index) {
     driver_.reset();
@@ -57,6 +94,7 @@ void IlaPanel::setChain(jtag::JtagChain* chain, int device_index) {
         (void)driver_->probe(caps);  // best-effort; falls back to defaults
         if (pre_samples_ >= driver_->depth())
             pre_samples_ = driver_->depth() / 4;
+        resetSignalDefs();
     }
 }
 
@@ -75,6 +113,7 @@ void IlaPanel::setBscaneChain(jtag::JtagChain* chain, int pl_tap_index) {
         (void)driver_->probe(caps);  // best-effort; falls back to defaults
         if (pre_samples_ >= driver_->depth())
             pre_samples_ = driver_->depth() / 4;
+        resetSignalDefs();
     }
 }
 
@@ -264,6 +303,10 @@ void IlaPanel::draw() {
                            "%zu samples read", samples_.size());
     }
 
+    // ── Signal lane editor ───────────────────────────────────────────
+    if (hw_ok)
+        drawSignalEditor();
+
     // ── Error display ────────────────────────────────────────────────
     if (!last_error_.empty()) {
         ImGui::Separator();
@@ -288,6 +331,80 @@ void IlaPanel::draw() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// drawSignalEditor  -- collapsible lane-definition table
+// ─────────────────────────────────────────────────────────────────────────────
+
+void IlaPanel::drawSignalEditor() {
+    if (!ImGui::CollapsingHeader("Signal Definitions")) return;
+
+    if (ImGui::SmallButton("Reset from CAPS")) resetSignalDefs();
+    ImGui::SameLine();
+    if (ImGui::SmallButton("+ Add")) {
+        const int dw = driverOk() ? driver_->dataWidth()
+                                  : jtag::ila::IlaDriver::kDataWidth;
+        IlaSignalDef d{};
+        std::snprintf(d.name, sizeof(d.name), "sig");
+        d.hi  = dw - 1;
+        d.lo  = 0;
+        d.fmt = BusFormat::HEX;
+        signals_.push_back(d);
+    }
+
+    static const char* kFmtNames[] = {"HEX", "DEC", "BIN"};
+    constexpr ImGuiTableFlags kTblFlags =
+        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_SizingFixedFit;
+
+    if (!ImGui::BeginTable("##sigdefs", 6, kTblFlags)) return;
+
+    ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+    ImGui::TableSetupColumn("Hi",   ImGuiTableColumnFlags_WidthFixed,  36.0f);
+    ImGui::TableSetupColumn("Lo",   ImGuiTableColumnFlags_WidthFixed,  36.0f);
+    ImGui::TableSetupColumn("W",    ImGuiTableColumnFlags_WidthFixed,  28.0f);
+    ImGui::TableSetupColumn("Fmt",  ImGuiTableColumnFlags_WidthFixed,  52.0f);
+    ImGui::TableSetupColumn("",     ImGuiTableColumnFlags_WidthFixed,  20.0f);
+    ImGui::TableHeadersRow();
+
+    int to_remove = -1;
+    const int n = static_cast<int>(signals_.size());
+    for (int i = 0; i < n; i++) {
+        IlaSignalDef& s = signals_[i];
+        ImGui::TableNextRow();
+        ImGui::PushID(i);
+
+        ImGui::TableSetColumnIndex(0);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputText("##n", s.name, sizeof(s.name));
+
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputInt("##hi", &s.hi, 0, 0);
+
+        ImGui::TableSetColumnIndex(2);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputInt("##lo", &s.lo, 0, 0);
+
+        ImGui::TableSetColumnIndex(3);
+        ImGui::Text("%d", s.width());
+
+        ImGui::TableSetColumnIndex(4);
+        int fi = static_cast<int>(s.fmt);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::Combo("##f", &fi, kFmtNames, 3))
+            s.fmt = static_cast<BusFormat>(fi);
+
+        ImGui::TableSetColumnIndex(5);
+        if (ImGui::SmallButton("X")) to_remove = i;
+
+        ImGui::PopID();
+    }
+    if (to_remove >= 0)
+        signals_.erase(signals_.begin() + to_remove);
+
+    ImGui::EndTable();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // drawWaveform  -- embedded ImPlot chart
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -298,82 +415,126 @@ void IlaPanel::drawWaveform() {
     ImGui::Separator();
     ImGui::Text("Waveform  (8 ns/sample @ 125 MHz)");
 
-    const float plot_h = ImGui::GetContentRegionAvail().y - 8.0f;
-    if (ImPlot::BeginPlot("##ila_wave",
-                          ImVec2(-1, plot_h > 80.0f ? plot_h : 150.0f),
-                          ImPlotFlags_NoTitle)) {
-        // Y axis fixed [0,1] normalized — tick labels hidden for bus display
-        ImPlot::SetupAxes("Time (ns)", nullptr,
-                          ImPlotAxisFlags_None,
-                          ImPlotAxisFlags_NoDecorations);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 1.0, ImPlotCond_Always);
+    const int n_lanes = static_cast<int>(signals_.size());
+    if (n_lanes == 0) {
+        ImGui::TextDisabled("No signal definitions. Expand 'Signal Definitions' above.");
+        return;
+    }
 
-        // Dummy scatter so ImPlot registers the "ILA_DATA[31:0]" legend item
-        // (needed to give the plot a stable identity; actual drawing via DrawList)
-        {
-            static const double dummy_x = 0.0, dummy_y = 0.5;
-            ImPlotSpec s;
-            s.Marker = ImPlotMarker_None;
-            ImPlot::PlotLine("ILA_DATA[31:0]", &dummy_x, &dummy_y, 1, s);
-        }
+    // Y-axis tick positions and labels (lane 0 = topmost = highest Y value)
+    std::vector<double>      tick_y(n_lanes);
+    std::vector<const char*> tick_names(n_lanes);
+    for (int i = 0; i < n_lanes; i++) {
+        tick_y[i]     = static_cast<double>(n_lanes - i) - 0.5;
+        tick_names[i] = signals_[i].name;
+    }
 
-        // Bus blocks drawn directly with ImDrawList
-        {
-            ImDrawList* dl       = ImPlot::GetPlotDrawList();
-            ImPlot::PushPlotClipRect();
+    // Lane color palette (6-color cyclic)
+    static const ImU32 kFill[] = {
+        IM_COL32(100,149,237, 80), IM_COL32(144,238,144, 80),
+        IM_COL32(255,165,  0, 80), IM_COL32(255,105,180, 80),
+        IM_COL32( 64,224,208, 80), IM_COL32(238,130,238, 80),
+    };
+    static const ImU32 kLine[] = {
+        IM_COL32(100,149,237,220), IM_COL32(144,238,144,220),
+        IM_COL32(255,165,  0,220), IM_COL32(255,105,180,220),
+        IM_COL32( 64,224,208,220), IM_COL32(238,130,238,220),
+    };
+    constexpr int kPalette = 6;
+    const ImU32 col_text = IM_COL32(220,220,220,255);
+    const double sample_period = 8.0;
 
-            const ImU32 col_fill = IM_COL32(100, 149, 237,  80);
-            const ImU32 col_line = IM_COL32(100, 149, 237, 220);
-            const ImU32 col_text = IM_COL32(220, 220, 220, 255);
-            const double y_lo = 0.1, y_hi = 0.9;
+    // Scale plot height to number of lanes (≥80 px floor)
+    const float lane_px  = 28.0f;
+    const float avail_h  = ImGui::GetContentRegionAvail().y - 8.0f;
+    const float target_h = lane_px * static_cast<float>(n_lanes) + 20.0f;
+    const float plot_h   = std::max({avail_h, target_h, 80.0f});
 
-            // Extend last sample one extra period to the right
-            const double sample_period = 8.0;
+    if (!ImPlot::BeginPlot("##ila_wave", ImVec2(-1.0f, plot_h),
+                           ImPlotFlags_NoTitle))
+        return;
 
-            int run_start = 0;
-            for (int j = 1; j <= n; ++j) {
+    ImPlot::SetupAxes("Time (ns)", nullptr,
+                      ImPlotAxisFlags_None,
+                      ImPlotAxisFlags_NoGridLines | ImPlotAxisFlags_NoTickMarks);
+    ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, static_cast<double>(n_lanes),
+                            ImPlotCond_Always);
+    ImPlot::SetupAxisTicks(ImAxis_Y1,
+                           tick_y.data(), n_lanes, tick_names.data());
+
+    ImDrawList* dl = ImPlot::GetPlotDrawList();
+    ImPlot::PushPlotClipRect();
+
+    for (int lane = 0; lane < n_lanes; lane++) {
+        const IlaSignalDef& sig = signals_[lane];
+        const int    c    = lane % kPalette;
+        const double y_hi = static_cast<double>(n_lanes - lane) - 0.1;
+        const double y_lo = static_cast<double>(n_lanes - lane) - 0.9;
+
+        if (sig.width() == 1) {
+            // ── Digital lane: step-function ──────────────────────────
+            for (int j = 0; j < n; j++) {
+                const bool  high = (sig.extract(samples_[j]) != 0u);
+                const double y   = high ? y_hi : y_lo;
+                const double t0  = wave_x_[j];
+                const double t1  = (j + 1 < n) ? wave_x_[j + 1]
+                                                : wave_x_[n - 1] + sample_period;
+                dl->AddLine(ImPlot::PlotToPixels(t0, y),
+                            ImPlot::PlotToPixels(t1, y),
+                            kLine[c], 1.5f);
+                // Vertical edge on transition
+                if (j + 1 < n &&
+                    sig.extract(samples_[j + 1]) != sig.extract(samples_[j])) {
+                    dl->AddLine(ImPlot::PlotToPixels(t1, y_lo),
+                                ImPlot::PlotToPixels(t1, y_hi),
+                                kLine[c], 1.5f);
+                }
+            }
+        } else {
+            // ── Bus lane: colored run-length blocks ──────────────────
+            int run = 0;
+            for (int j = 1; j <= n; j++) {
                 const bool flush = (j == n) ||
-                    (samples_[j] != samples_[run_start]);
+                    (sig.extract(samples_[j]) != sig.extract(samples_[run]));
                 if (!flush) continue;
 
-                const double t0_run = wave_x_[run_start];
-                const double t1_run = (j < n)
-                    ? wave_x_[j]
-                    : wave_x_[n - 1] + sample_period;
+                const double t0 = wave_x_[run];
+                const double t1 = (j < n) ? wave_x_[j]
+                                          : wave_x_[n - 1] + sample_period;
+                const ImVec2 p0 = ImPlot::PlotToPixels(t0, y_hi);
+                const ImVec2 p1 = ImPlot::PlotToPixels(t1, y_lo);
 
-                ImVec2 p0 = ImPlot::PlotToPixels(t0_run, y_hi);
-                ImVec2 p1 = ImPlot::PlotToPixels(t1_run, y_lo);
+                dl->AddRectFilled(p0, p1, kFill[c]);
+                dl->AddRect      (p0, p1, kLine[c], 0.0f, 0, 1.5f);
 
-                dl->AddRectFilled(p0, p1, col_fill);
-                dl->AddRect(p0, p1, col_line, 0.0f, 0, 1.5f);
-
-                // Hex label inside the block
-                char label[12];
-                std::snprintf(label, sizeof(label), "0x%08X", samples_[run_start]);
-                const float block_w = p1.x - p0.x;
-                const float text_w  = ImGui::CalcTextSize(label).x;
-                if (block_w > text_w + 6.0f) {
-                    const float cx = (p0.x + p1.x) * 0.5f - text_w * 0.5f;
-                    const float cy = (p0.y + p1.y) * 0.5f
-                                   - ImGui::GetTextLineHeight() * 0.5f;
-                    dl->AddText(ImVec2(cx, cy), col_text, label);
+                char label[24];
+                formatSampleValue(label, sizeof(label),
+                                  sig.extract(samples_[run]),
+                                  sig.fmt, sig.width());
+                const float bw = p1.x - p0.x;
+                const float tw = ImGui::CalcTextSize(label).x;
+                if (bw > tw + 6.0f) {
+                    dl->AddText(
+                        ImVec2((p0.x + p1.x) * 0.5f - tw * 0.5f,
+                               (p0.y + p1.y) * 0.5f
+                               - ImGui::GetTextLineHeight() * 0.5f),
+                        col_text, label);
                 }
-                run_start = j;
+                run = j;
             }
-
-            // Trigger cursor
-            if (pre_samples_ > 0 && pre_samples_ < n) {
-                const double tx = wave_x_[pre_samples_];
-                ImVec2 tp0 = ImPlot::PlotToPixels(tx, 1.2);
-                ImVec2 tp1 = ImPlot::PlotToPixels(tx, -0.2);
-                dl->AddLine(tp0, tp1, IM_COL32(255, 80, 80, 220), 1.5f);
-            }
-
-            ImPlot::PopPlotClipRect();
         }
-
-        ImPlot::EndPlot();
     }
+
+    // Trigger cursor
+    if (pre_samples_ > 0 && pre_samples_ < n) {
+        const double tx = wave_x_[pre_samples_];
+        dl->AddLine(ImPlot::PlotToPixels(tx, static_cast<double>(n_lanes)),
+                    ImPlot::PlotToPixels(tx, 0.0),
+                    IM_COL32(255, 80, 80, 220), 1.5f);
+    }
+
+    ImPlot::PopPlotClipRect();
+    ImPlot::EndPlot();
 }
 
 } // namespace jtag::gui

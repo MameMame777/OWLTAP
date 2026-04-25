@@ -39,6 +39,8 @@
 #include "src/boundary_scan/interconnect_test.h"
 #include "src/config/pl_config.h"
 #include "src/flash/flash_programmer.h"
+#include "src/mcp/mcp_transport.h"
+#include "src/mcp/tools/register_tools.h"
 #include "src/script/script_engine.h"
 #include "src/script/test_suite.h"
 #include "src/xdc/xdc_parser.h"
@@ -329,6 +331,9 @@ AppWindow::~AppWindow() {
     config_.ila_or_mode   = ila_panel_.orMode();
     config_.save("cfg.json");
 
+    // Stop MCP server before disconnecting hardware.
+    onMcpStop();
+
     onDisconnect();
 
     if (window_) {
@@ -488,6 +493,25 @@ void AppWindow::buildStatusBar() {
         ImGui::TextColored(theme::kMuted, "Samples:");
         ImGui::SameLine();
         ImGui::Text("%zu", cached_samples_.size());
+
+        // ── MCP server status ─────────────────────────────
+        ImGui::SameLine();
+        ImGui::TextColored(theme::kMuted, "|");
+        ImGui::SameLine();
+        switch (mcp_mode_) {
+            case McpMode::kOff:
+                ImGui::TextColored(theme::kMuted, "MCP: off");
+                break;
+            case McpMode::kStdio:
+                ImGui::TextColored(theme::kSuccess, "MCP: stdio");
+                break;
+            case McpMode::kTcp: {
+                char tcp_buf[32];
+                std::snprintf(tcp_buf, sizeof(tcp_buf), "MCP: tcp:%u", mcp_tcp_port_);
+                ImGui::TextColored(theme::kSuccess, "%s", tcp_buf);
+                break;
+            }
+        }
 
         // ── Right-aligned: status message + FPS ──────────
         const ImGuiIO& io = ImGui::GetIO();
@@ -1922,6 +1946,20 @@ void AppWindow::buildMenuBar() {
             if (ImGui::MenuItem("Reset Layout")) {
                 reset_layout_requested_ = true;
             }
+            ImGui::Separator();
+            if (ImGui::BeginMenu("MCP Server")) {
+                const bool running = (mcp_mode_ != McpMode::kOff);
+                if (ImGui::MenuItem("Start (stdio)", nullptr, false, !running && connected_)) {
+                    onMcpStartStdio();
+                }
+                if (ImGui::MenuItem("Start (TCP :4711)", nullptr, false, !running && connected_)) {
+                    onMcpStartTcp(4711);
+                }
+                if (ImGui::MenuItem("Stop", nullptr, false, running)) {
+                    onMcpStop();
+                }
+                ImGui::EndMenu();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Test")) {
@@ -2232,6 +2270,70 @@ void AppWindow::drawProgramFlashModal() {
         }
         ImGui::EndPopup();
     }
+}
+
+// ── MCP server ─────────────────────────────────────────────────────
+
+void AppWindow::onMcpStartStdio() {
+    if (mcp_mode_ != McpMode::kOff) return;
+    if (!connected_) return;
+
+    mcp_executor_ = std::make_unique<hardware::HardwareExecutor>(config_);
+    std::string err = mcp_executor_->start();
+    if (!err.empty()) {
+        setStatusMessage("MCP executor start failed: " + err);
+        mcp_executor_.reset();
+        return;
+    }
+
+    mcp_bridge_ = std::make_unique<mcp::ExecutorBridge>(*mcp_executor_);
+
+    mcp_server_ = std::make_unique<mcp::McpServer>(
+        mcp::ServerInfo{"owltap-mcp", "0.1.0"});
+    mcp_server_->setExecutorBridge(mcp_bridge_.get());
+    mcp::tools::registerHardwareTools(mcp_server_->registry(), *mcp_bridge_);
+    mcp_server_->setTransport(std::make_unique<mcp::StdioTransport>());
+    mcp_server_->start();
+    mcp_mode_ = McpMode::kStdio;
+    setStatusMessage("MCP server started (stdio).");
+}
+
+void AppWindow::onMcpStartTcp(uint16_t port) {
+    if (mcp_mode_ != McpMode::kOff) return;
+    if (!connected_) return;
+
+    mcp_executor_ = std::make_unique<hardware::HardwareExecutor>(config_);
+    std::string err = mcp_executor_->start();
+    if (!err.empty()) {
+        setStatusMessage("MCP executor start failed: " + err);
+        mcp_executor_.reset();
+        return;
+    }
+
+    mcp_bridge_ = std::make_unique<mcp::ExecutorBridge>(*mcp_executor_);
+
+    mcp_server_ = std::make_unique<mcp::McpServer>(
+        mcp::ServerInfo{"owltap-mcp", "0.1.0"});
+    mcp_server_->setExecutorBridge(mcp_bridge_.get());
+    mcp::tools::registerHardwareTools(mcp_server_->registry(), *mcp_bridge_);
+    mcp_server_->setTransport(
+        std::make_unique<mcp::TcpTransport>(port));
+    mcp_server_->start();
+    mcp_tcp_port_ = port;
+    mcp_mode_ = McpMode::kTcp;
+
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "MCP server started (TCP port %u).", port);
+    setStatusMessage(buf);
+}
+
+void AppWindow::onMcpStop() {
+    if (mcp_mode_ == McpMode::kOff) return;
+    if (mcp_server_) { mcp_server_->stop(); mcp_server_.reset(); }
+    if (mcp_bridge_) { mcp_bridge_.reset(); }
+    if (mcp_executor_) { mcp_executor_->shutdown(); mcp_executor_.reset(); }
+    mcp_mode_ = McpMode::kOff;
+    setStatusMessage("MCP server stopped.");
 }
 
 } // namespace jtag::gui

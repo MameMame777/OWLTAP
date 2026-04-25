@@ -16,6 +16,10 @@
 #include "src/ftdi/ftdi_device.h"
 #include "src/jtag/jtag_chain.h"
 #include "src/jtag/tap_controller.h"
+#include "src/mcp/executor_bridge.h"
+#include "src/mcp/mcp_server.h"
+#include "src/mcp/mcp_transport.h"
+#include "src/hardware/hardware_executor.h"
 #include "src/script/test_suite.h"
 
 struct GLFWwindow;
@@ -71,6 +75,11 @@ private:
     void onLoadSuite();
     void onRunSuite();
     void onExportSuiteReport();
+
+    // MCP server actions
+    void onMcpStartStdio();
+    void onMcpStartTcp(uint16_t port);
+    void onMcpStop();
 
     // PL programming (background thread)
     void onProgramPl();
@@ -155,6 +164,14 @@ private:
     std::thread program_flash_thread_;
 
     AppConfig config_;
+
+    // MCP server (optional; created on-demand)
+    enum class McpMode { kOff, kStdio, kTcp };
+    McpMode                                    mcp_mode_{McpMode::kOff};
+    std::unique_ptr<hardware::HardwareExecutor> mcp_executor_;
+    std::unique_ptr<mcp::ExecutorBridge>        mcp_bridge_;
+    std::unique_ptr<mcp::McpServer>             mcp_server_;
+    uint16_t                                    mcp_tcp_port_{4711};
 };
 
 } // namespace jtag::gui

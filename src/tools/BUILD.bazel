@@ -35,3 +35,20 @@ cc_binary(
         "//src/jtag:tap_controller",
     ],
 )
+
+cc_binary(
+    name = "owltap_mcp",
+    srcs = ["owltap_mcp.cpp"],
+    deps = [
+        "//src/gui:app_config",
+        "//src/hardware:hardware_executor",
+        "//src/mcp:executor_bridge",
+        "//src/mcp:mcp_server",
+        "//src/mcp:mcp_transport",
+        "//src/mcp/tools:register_tools",
+    ],
+    linkopts = select({
+        "@platforms//os:windows": ["-DEFAULTLIB:ws2_32.lib"],
+        "//conditions:default": [],
+    }),
+)

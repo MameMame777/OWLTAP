@@ -30,6 +30,7 @@
 #include "app_config.h"
 #include "debug_log_panel.h"
 #include "device_dialog.h"
+#include "gui_theme.h"
 #include "hex_panel.h"
 #include "ila_panel.h"
 #include "interconnect_panel.h"
@@ -303,7 +304,10 @@ AppWindow::AppWindow() {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    applyTheme();
+    const float dpi_scale = theme::computeDpiScale(window_);
+    theme::applyFonts(io, 16.0f, dpi_scale);
+    theme::applyDarkTheme();
+    theme::scaleStyleForDpi(dpi_scale);
 
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330");
@@ -317,107 +321,12 @@ AppWindow::AppWindow() {
     setStatusMessage(status_text_);
 }
 
-// ── Theme ───────────────────────────────────────────────────────────
-
-void AppWindow::applyTheme() {
-    ImGui::StyleColorsDark();
-
-    ImGuiStyle& s = ImGui::GetStyle();
-
-    // --- Shape ---
-    s.WindowRounding    = 8.0f;
-    s.ChildRounding     = 6.0f;
-    s.FrameRounding     = 5.0f;
-    s.PopupRounding     = 6.0f;
-    s.ScrollbarRounding = 4.0f;
-    s.GrabRounding      = 4.0f;
-    s.TabRounding       = 5.0f;
-
-    // --- Spacing ---
-    s.WindowPadding     = ImVec2(12.0f, 10.0f);
-    s.FramePadding      = ImVec2(8.0f, 4.0f);
-    s.ItemSpacing       = ImVec2(8.0f, 5.0f);
-    s.ItemInnerSpacing  = ImVec2(6.0f, 4.0f);
-    s.ScrollbarSize     = 12.0f;
-    s.GrabMinSize       = 8.0f;
-    s.WindowBorderSize  = 1.0f;
-    s.FrameBorderSize   = 0.0f;
-
-    // --- Colors (overriding StyleColorsDark base) ---
-    ImVec4* c = s.Colors;
-
-    // Backgrounds
-    c[ImGuiCol_WindowBg]          = ImVec4(0.11f, 0.11f, 0.14f, 1.00f);
-    c[ImGuiCol_ChildBg]           = ImVec4(0.09f, 0.09f, 0.12f, 1.00f);
-    c[ImGuiCol_PopupBg]           = ImVec4(0.14f, 0.14f, 0.18f, 1.00f);
-    c[ImGuiCol_MenuBarBg]         = ImVec4(0.09f, 0.09f, 0.12f, 1.00f);
-    c[ImGuiCol_ScrollbarBg]       = ImVec4(0.09f, 0.09f, 0.12f, 1.00f);
-
-    // Borders & separators
-    c[ImGuiCol_Border]            = ImVec4(0.28f, 0.28f, 0.36f, 0.60f);
-    c[ImGuiCol_BorderShadow]      = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    c[ImGuiCol_Separator]         = ImVec4(0.28f, 0.28f, 0.36f, 0.80f);
-    c[ImGuiCol_SeparatorHovered]  = ImVec4(0.40f, 0.70f, 1.00f, 0.60f);
-    c[ImGuiCol_SeparatorActive]   = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
-
-    // Frames
-    c[ImGuiCol_FrameBg]           = ImVec4(0.18f, 0.18f, 0.24f, 1.00f);
-    c[ImGuiCol_FrameBgHovered]    = ImVec4(0.24f, 0.24f, 0.32f, 1.00f);
-    c[ImGuiCol_FrameBgActive]     = ImVec4(0.28f, 0.28f, 0.38f, 1.00f);
-
-    // Title bars
-    c[ImGuiCol_TitleBg]           = ImVec4(0.09f, 0.09f, 0.12f, 1.00f);
-    c[ImGuiCol_TitleBgActive]     = ImVec4(0.16f, 0.29f, 0.48f, 1.00f);
-    c[ImGuiCol_TitleBgCollapsed]  = ImVec4(0.09f, 0.09f, 0.12f, 0.80f);
-
-    // Buttons
-    c[ImGuiCol_Button]            = ImVec4(0.18f, 0.36f, 0.60f, 1.00f);
-    c[ImGuiCol_ButtonHovered]     = ImVec4(0.26f, 0.48f, 0.75f, 1.00f);
-    c[ImGuiCol_ButtonActive]      = ImVec4(0.14f, 0.28f, 0.50f, 1.00f);
-
-    // Headers (CollapsingHeader, Selectable, etc.)
-    c[ImGuiCol_Header]            = ImVec4(0.18f, 0.36f, 0.60f, 0.50f);
-    c[ImGuiCol_HeaderHovered]     = ImVec4(0.26f, 0.48f, 0.75f, 0.60f);
-    c[ImGuiCol_HeaderActive]      = ImVec4(0.26f, 0.48f, 0.75f, 1.00f);
-
-    // Accent elements
-    c[ImGuiCol_CheckMark]         = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
-    c[ImGuiCol_SliderGrab]        = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
-    c[ImGuiCol_SliderGrabActive]  = ImVec4(0.55f, 0.80f, 1.00f, 1.00f);
-    c[ImGuiCol_ScrollbarGrab]     = ImVec4(0.25f, 0.42f, 0.62f, 1.00f);
-    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.34f, 0.55f, 0.78f, 1.00f);
-    c[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
-    c[ImGuiCol_ResizeGrip]        = ImVec4(0.40f, 0.70f, 1.00f, 0.30f);
-    c[ImGuiCol_ResizeGripHovered] = ImVec4(0.40f, 0.70f, 1.00f, 0.60f);
-    c[ImGuiCol_ResizeGripActive]  = ImVec4(0.40f, 0.70f, 1.00f, 0.90f);
-
-    // Tabs
-    c[ImGuiCol_Tab]               = ImVec4(0.13f, 0.25f, 0.42f, 1.00f);
-    c[ImGuiCol_TabHovered]        = ImVec4(0.40f, 0.70f, 1.00f, 0.80f);
-    c[ImGuiCol_TabActive]         = ImVec4(0.20f, 0.42f, 0.68f, 1.00f);
-    c[ImGuiCol_TabUnfocused]      = ImVec4(0.09f, 0.09f, 0.12f, 1.00f);
-    c[ImGuiCol_TabUnfocusedActive]= ImVec4(0.14f, 0.26f, 0.42f, 1.00f);
-
-    // Docking
-    c[ImGuiCol_DockingPreview]    = ImVec4(0.40f, 0.70f, 1.00f, 0.70f);
-    c[ImGuiCol_DockingEmptyBg]    = ImVec4(0.08f, 0.08f, 0.10f, 1.00f);
-
-    // Text selection / navigation
-    c[ImGuiCol_TextSelectedBg]    = ImVec4(0.18f, 0.36f, 0.60f, 0.50f);
-    c[ImGuiCol_NavHighlight]      = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
-
-    // Plot colors (match waveform signal line color)
-    c[ImGuiCol_PlotLines]         = ImVec4(0.53f, 0.70f, 0.98f, 1.00f);
-    c[ImGuiCol_PlotLinesHovered]  = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
-    c[ImGuiCol_PlotHistogram]     = ImVec4(0.53f, 0.70f, 0.98f, 1.00f);
-    c[ImGuiCol_PlotHistogramHovered] = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
-}
-
 AppWindow::~AppWindow() {
     // Save config before destroying
     config_.selected_pins = SignalPanel::selectedSignals();
     config_.buses         = SignalPanel::buses();
     config_.ila_signals   = ila_panel_.exportSignalConfigs();
+    config_.ila_or_mode   = ila_panel_.orMode();
     config_.save("cfg.json");
 
     onDisconnect();
@@ -524,6 +433,9 @@ void AppWindow::run() {
         // Flash programming progress modal
         drawProgramFlashModal();
 
+        // Persistent status bar at the bottom of the viewport
+        buildStatusBar();
+
         // Periodic refresh from capture engine (~20 Hz)
         if (capturing_) {
             auto now = std::chrono::steady_clock::now();
@@ -537,6 +449,71 @@ void AppWindow::run() {
 
         endFrame();
     }
+}
+
+void AppWindow::buildStatusBar() {
+    const float h = ImGui::GetFrameHeight();
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    if (!ImGui::BeginViewportSideBar("##StatusBar", vp, ImGuiDir_Down, h,
+            ImGuiWindowFlags_NoSavedSettings |
+            ImGuiWindowFlags_MenuBar |
+            ImGuiWindowFlags_NoScrollbar)) {
+        ImGui::End();
+        return;
+    }
+    if (ImGui::BeginMenuBar()) {
+        // ── Connection ───────────────────────────────────
+        if (connected_) {
+            ImGui::TextColored(theme::kSuccess, "● Connected");
+        } else {
+            ImGui::TextColored(theme::kMuted, "○ Disconnected");
+        }
+
+        ImGui::SameLine();
+        ImGui::TextColored(theme::kMuted, "|");
+        ImGui::SameLine();
+
+        // ── Capture state ────────────────────────────────
+        if (capturing_) {
+            ImGui::TextColored(theme::kAccent, "▶ Capturing");
+        } else if (capture_engine_) {
+            ImGui::TextColored(theme::kMuted, "■ Idle");
+        } else {
+            ImGui::TextColored(theme::kMuted, "— No engine");
+        }
+
+        ImGui::SameLine();
+        ImGui::TextColored(theme::kMuted, "|");
+        ImGui::SameLine();
+        ImGui::TextColored(theme::kMuted, "Samples:");
+        ImGui::SameLine();
+        ImGui::Text("%zu", cached_samples_.size());
+
+        // ── Right-aligned: status message + FPS ──────────
+        const ImGuiIO& io = ImGui::GetIO();
+        char fps_buf[32];
+        std::snprintf(fps_buf, sizeof(fps_buf), "%.0f FPS", io.Framerate);
+
+        const float right_pad   = 12.0f;
+        const float fps_w       = ImGui::CalcTextSize(fps_buf).x;
+        const float status_w    = ImGui::CalcTextSize(status_text_.c_str()).x;
+        const float sep_w       = ImGui::CalcTextSize(" | ").x;
+        const float reserved    = fps_w + sep_w + status_w + right_pad;
+        const float avail       = ImGui::GetContentRegionAvail().x;
+        if (avail > reserved) {
+            ImGui::SameLine(0.0f, avail - reserved);
+        } else {
+            ImGui::SameLine();
+        }
+        ImGui::TextColored(theme::kMuted, "%s", status_text_.c_str());
+        ImGui::SameLine();
+        ImGui::TextColored(theme::kMuted, "|");
+        ImGui::SameLine();
+        ImGui::TextColored(theme::kMuted, "%s", fps_buf);
+
+        ImGui::EndMenuBar();
+    }
+    ImGui::End();
 }
 
 // ── Backend actions ─────────────────────────────────────────────────
@@ -602,6 +579,7 @@ void AppWindow::onConnect() {
         // provide them (e.g. older bitstream without SIG_DEF support).
         if (!ila_panel_.hasSigDefsFromRtl())
             ila_panel_.importSignalConfigs(config_.ila_signals);
+        ila_panel_.setOrMode(config_.ila_or_mode);
     }
 
     // Build device info string
@@ -1396,6 +1374,7 @@ void AppWindow::onLoadConfig() {
 
     // Restore ILA signal lane definitions (no-op if empty)
     ila_panel_.importSignalConfigs(config_.ila_signals);
+    ila_panel_.setOrMode(config_.ila_or_mode);
 
     // Restore XDC aliases
     if (!config_.xdc_path.empty()) {
@@ -1459,6 +1438,7 @@ void AppWindow::onSaveConfig() {
     config_.selected_pins = SignalPanel::selectedSignals();
     config_.buses         = SignalPanel::buses();
     config_.ila_signals   = ila_panel_.exportSignalConfigs();
+    config_.ila_or_mode   = ila_panel_.orMode();
     if (config_.save(path)) {
         setStatusMessage("Config saved: " + path);
     } else {
@@ -1532,6 +1512,11 @@ void AppWindow::drawInterconnectPanel() {
 }
 
 void AppWindow::initializeDockLayout(unsigned int dockspace_id) {
+    const bool force_reset = reset_layout_requested_;
+    if (force_reset) {
+        reset_layout_requested_ = false;
+        dock_layout_initialized_ = false;
+    }
     if (dock_layout_initialized_) return;
     dock_layout_initialized_ = true;
 
@@ -1541,9 +1526,12 @@ void AppWindow::initializeDockLayout(unsigned int dockspace_id) {
     const bool log_has_saved_dock =
         log_settings != nullptr && log_settings->DockId != 0;
 
-    if (root != nullptr && (root->ChildNodes[0] != nullptr ||
+    const bool has_existing_layout =
+        root != nullptr && (root->ChildNodes[0] != nullptr ||
                             root->ChildNodes[1] != nullptr ||
-                            root->Windows.Size > 0)) {
+                            root->Windows.Size > 0);
+
+    if (has_existing_layout && !force_reset) {
         if (!log_has_saved_dock) {
             ImGuiID dock_main = dockspace_id;
             ImGuiID dock_log = ImGui::DockBuilderSplitNode(
@@ -1554,23 +1542,43 @@ void AppWindow::initializeDockLayout(unsigned int dockspace_id) {
         return;
     }
 
+    // Default layout (also used by View > Reset Layout):
+    //  ┌──────────┬────────────────────────────────┬──────────┐
+    //  │ Signals  │  Waveforms / ILA / Bus Values  │   Pin    │
+    //  │          │  (tabbed)                      │  Control │
+    //  │          ├────────────────────────────────┤  Script  │
+    //  │          │  Protocol Analyzer             │  Suite   │
+    //  │          │                                │ (right)  │
+    //  ├──────────┴────────────────────────────────┴──────────┤
+    //  │                    Debug Log                          │
+    //  └───────────────────────────────────────────────────────┘
     ImGui::DockBuilderRemoveNode(dockspace_id);
     ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->WorkSize);
 
-    ImGuiID dock_top = dockspace_id;
-    ImGuiID dock_waveforms = ImGui::DockBuilderSplitNode(
-        dock_top, ImGuiDir_Down, 0.38f, nullptr, &dock_top);
-    ImGuiID dock_signals = ImGui::DockBuilderSplitNode(
-        dock_top, ImGuiDir_Left, 0.20f, nullptr, &dock_top);
+    ImGuiID dock_main = dockspace_id;
     ImGuiID dock_log = ImGui::DockBuilderSplitNode(
-        dock_waveforms, ImGuiDir_Down, 0.35f, nullptr, &dock_waveforms);
+        dock_main, ImGuiDir_Down, 0.20f, nullptr, &dock_main);
+    ImGuiID dock_signals = ImGui::DockBuilderSplitNode(
+        dock_main, ImGuiDir_Left, 0.18f, nullptr, &dock_main);
+    ImGuiID dock_tools = ImGui::DockBuilderSplitNode(
+        dock_main, ImGuiDir_Right, 0.24f, nullptr, &dock_main);
+    ImGuiID dock_inspectors = ImGui::DockBuilderSplitNode(
+        dock_main, ImGuiDir_Down, 0.35f, nullptr, &dock_main);
 
+    // Left: signal selector
     ImGui::DockBuilderDockWindow("Signals", dock_signals);
-    ImGui::DockBuilderDockWindow("Bus Values", dock_top);
-    ImGui::DockBuilderDockWindow("Pin Control", dock_top);
-    ImGui::DockBuilderDockWindow("Script Runner", dock_top);
-    ImGui::DockBuilderDockWindow("Waveforms", dock_waveforms);
+    // Center top (tabbed): primary signal views
+    ImGui::DockBuilderDockWindow("Waveforms", dock_main);
+    ImGui::DockBuilderDockWindow("Internal Logic Analyzer", dock_main);
+    ImGui::DockBuilderDockWindow("Bus Values", dock_main);
+    // Center bottom: protocol inspector
+    ImGui::DockBuilderDockWindow("Protocol Analyzer", dock_inspectors);
+    // Right (tabbed): control & scripting tools
+    ImGui::DockBuilderDockWindow("Pin Control", dock_tools);
+    ImGui::DockBuilderDockWindow("Script Runner", dock_tools);
+    ImGui::DockBuilderDockWindow("Interconnect Test", dock_tools);
+    // Bottom: log
     ImGui::DockBuilderDockWindow("Debug Log", dock_log);
     ImGui::DockBuilderFinish(dockspace_id);
 }
@@ -1897,6 +1905,25 @@ void AppWindow::buildMenuBar() {
             }
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("View")) {
+            if (ImGui::MenuItem("Internal Logic Analyzer", nullptr,
+                                ila_panel_.isVisible())) {
+                ila_panel_.setVisible(!ila_panel_.isVisible());
+            }
+            if (ImGui::MenuItem("Protocol Analyzer", nullptr,
+                                ProtocolPanel::isVisible())) {
+                ProtocolPanel::setVisible(!ProtocolPanel::isVisible());
+            }
+            if (ImGui::MenuItem("Interconnect Test", nullptr,
+                                InterconnectPanel::isVisible())) {
+                InterconnectPanel::setVisible(!InterconnectPanel::isVisible());
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Reset Layout")) {
+                reset_layout_requested_ = true;
+            }
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Test")) {
             if (ImGui::MenuItem("Load Suite (.suite)...")) {
                 onLoadSuite();
@@ -1936,7 +1963,7 @@ void AppWindow::buildMenuBar() {
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Internal Logic Analyzer...", nullptr,
-                                ila_panel_.isVisible(), connected_)) {
+                                ila_panel_.isVisible())) {
                 ila_panel_.setVisible(!ila_panel_.isVisible());
             }
             ImGui::EndMenu();

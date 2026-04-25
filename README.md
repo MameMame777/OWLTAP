@@ -11,6 +11,9 @@
 
 ---
 
+OWLTAP is a desktop application for interfacing with the JTAG TAP of an FPGA or SoC device, providing boundary-scan control, signal capture, and waveform visualization.
+
+
 ## Features
 
 | Feature | Detail |
@@ -22,6 +25,7 @@
 | **Waveform capture** | Continuous or triggered multi-channel capture with configurable depth |
 | **Trigger engine** | Rising edge, falling edge, either edge, level; pre/post-trigger ratio |
 | **ImPlot waveform view** | Zoomable, pannable signal waveform display |
+| **MCP support** | Allow HW debug with your generative AI |
 | **VCD export** | Standard Value Change Dump export for GTKWave / Vivado logic analyser |
 | **Script engine** | Simple text script for automated set/expect sequences |
 | **Config persistence** | Last device settings saved to `cfg.json` |

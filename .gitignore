@@ -45,3 +45,8 @@ vivado*.backup.jou
 .Xil/
 hdl/ila/examples/*/vivado_proj/
 hdl/ila/examples/*/build_bitstream.log
+hdl/ila/examples/*/program_board.log
+
+# Simulation run logs
+hdl/ila/sim/exec/*_regression.log
+hdl/ila/sim/scripts/regress_temp.log

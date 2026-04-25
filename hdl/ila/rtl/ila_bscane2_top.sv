@@ -133,6 +133,9 @@ module ila_bscane2_top #(
     logic                ctrl_arm_tck, ctrl_stop_tck;
     logic                ctrl_reset_tck, ctrl_force_trig_tck;
     logic [DATA_W-1:0]   trig_mask_tck, trig_value_tck;
+    logic [DATA_W-1:0]   trig_rise_mask_tck, trig_fall_mask_tck;
+    logic [DATA_W-1:0]   trig_mask2_tck, trig_val2_tck;
+    logic                trig_or_mode_tck;
     logic [ADDR_W-1:0]   pre_samples_tck;
     logic [ADDR_W-1:0]   rd_addr_tck;
     logic [DATA_W-1:0]   rd_data_tck;
@@ -150,7 +153,7 @@ module ila_bscane2_top #(
     //   [15: 8] lo[7:0]   (inclusive LSB index, 0-based)
     //   [ 7: 0] name_idx  (0xFF = host auto-generates "data[hi:lo]")
     localparam logic [31:0] CONFIG_VAL = {
-        8'h01,
+        8'h03,           // VERSION 3: OR-mode trigger (TRIG_MASK2 / TRIG_VAL2 / TRIG_CTRL)
         4'(NUM_CH),
         4'(SIG_COUNT),
         6'(DATA_W - 1),
@@ -176,6 +179,11 @@ module ila_bscane2_top #(
             5'h0C:   capture_data = {{(DATA_W-ADDR_W){1'b0}}, rd_addr_tck};
             5'h0D:   capture_data = rd_data_tck;
             5'h0E:   capture_data = {{(DATA_W-ADDR_W){1'b0}}, pre_samples_tck};
+            5'h0F:   capture_data = trig_rise_mask_tck;
+            5'h10:   capture_data = trig_fall_mask_tck;
+            5'h11:   capture_data = trig_mask2_tck;
+            5'h12:   capture_data = trig_val2_tck;
+            5'h13:   capture_data = {{(DATA_W-1){1'b0}}, trig_or_mode_tck};
             default: capture_data = '0;
         endcase
     end
@@ -205,6 +213,11 @@ module ila_bscane2_top #(
             sig_def_idx         <= '0;
             trig_mask_tck       <= '0;
             trig_value_tck      <= '0;
+            trig_rise_mask_tck  <= '0;
+            trig_fall_mask_tck  <= '0;
+            trig_mask2_tck      <= '0;
+            trig_val2_tck       <= '0;
+            trig_or_mode_tck    <= 1'b0;
             pre_samples_tck     <= kDefaultPre;
             rd_addr_tck         <= '0;
             ctrl_arm_tck        <= 1'b0;
@@ -235,11 +248,16 @@ module ila_bscane2_top #(
                         ctrl_reset_tck      <= dr_shift[7];
                         ctrl_force_trig_tck <= dr_shift[8];
                     end
-                    5'h0A: trig_mask_tck   <= dr_shift[FRAME_W-1:5];
-                    5'h0B: trig_value_tck  <= dr_shift[FRAME_W-1:5];
-                    5'h0C: rd_addr_tck     <= dr_shift[5 +: ADDR_W];
-                    5'h0D: rd_addr_tck     <= rd_addr_tck + 1'b1;   // auto-inc
-                    5'h0E: pre_samples_tck <= dr_shift[5 +: ADDR_W];
+                    5'h0A: trig_mask_tck        <= dr_shift[FRAME_W-1:5];
+                    5'h0B: trig_value_tck        <= dr_shift[FRAME_W-1:5];
+                    5'h0C: rd_addr_tck           <= dr_shift[5 +: ADDR_W];
+                    5'h0D: rd_addr_tck           <= rd_addr_tck + 1'b1;   // auto-inc
+                    5'h0E: pre_samples_tck       <= dr_shift[5 +: ADDR_W];
+                    5'h0F: trig_rise_mask_tck    <= dr_shift[FRAME_W-1:5];
+                    5'h10: trig_fall_mask_tck    <= dr_shift[FRAME_W-1:5];
+                    5'h11: trig_mask2_tck        <= dr_shift[FRAME_W-1:5];
+                    5'h12: trig_val2_tck         <= dr_shift[FRAME_W-1:5];
+                    5'h13: trig_or_mode_tck      <= dr_shift[5];  // bit[0] of data field
                     default: ;
                 endcase
             end
@@ -275,16 +293,31 @@ module ila_bscane2_top #(
     (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] mask_sc_m, mask_sc;
     (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] val_sc_m,  val_sc;
     (* ASYNC_REG = "TRUE" *) logic [ADDR_W-1:0] pre_sc_m,  pre_sc;
+    (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] rise_sc_m, rise_sc;
+    (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] fall_sc_m, fall_sc;
+    (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] mask2_sc_m, mask2_sc;
+    (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] val2_sc_m,  val2_sc;
+    (* ASYNC_REG = "TRUE" *) logic              or_mode_sc_m, or_mode_sc;
 
     always_ff @(posedge sample_clk or negedge sample_rst_n) begin
         if (!sample_rst_n) begin
             mask_sc_m <= '0; mask_sc <= '0;
             val_sc_m  <= '0; val_sc  <= '0;
             pre_sc_m  <= '0; pre_sc  <= '0;
+            rise_sc_m <= '0; rise_sc <= '0;
+            fall_sc_m <= '0; fall_sc <= '0;
+            mask2_sc_m    <= '0; mask2_sc    <= '0;
+            val2_sc_m     <= '0; val2_sc     <= '0;
+            or_mode_sc_m  <= 1'b0; or_mode_sc <= 1'b0;
         end else begin
-            mask_sc_m <= trig_mask_tck;    mask_sc <= mask_sc_m;
-            val_sc_m  <= trig_value_tck;   val_sc  <= val_sc_m;
-            pre_sc_m  <= pre_samples_tck;  pre_sc  <= pre_sc_m;
+            mask_sc_m <= trig_mask_tck;         mask_sc <= mask_sc_m;
+            val_sc_m  <= trig_value_tck;        val_sc  <= val_sc_m;
+            pre_sc_m  <= pre_samples_tck;       pre_sc  <= pre_sc_m;
+            rise_sc_m <= trig_rise_mask_tck;    rise_sc <= rise_sc_m;
+            fall_sc_m <= trig_fall_mask_tck;    fall_sc <= fall_sc_m;
+            mask2_sc_m   <= trig_mask2_tck;     mask2_sc   <= mask2_sc_m;
+            val2_sc_m    <= trig_val2_tck;      val2_sc    <= val2_sc_m;
+            or_mode_sc_m <= trig_or_mode_tck;   or_mode_sc <= or_mode_sc_m;
         end
     end
 
@@ -300,6 +333,9 @@ module ila_bscane2_top #(
         .clk      (sample_clk),  .rst_n   (sample_rst_n),
         .data_in  (data_in),     .valid_in(data_valid),
         .mask     (mask_sc),     .value   (val_sc),
+        .rise_mask(rise_sc),     .fall_mask(fall_sc),
+        .mask2    (mask2_sc),    .val2     (val2_sc),
+        .or_mode  (or_mode_sc),
         .match    (trig_match_sc)
     );
 

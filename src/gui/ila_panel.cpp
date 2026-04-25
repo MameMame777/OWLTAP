@@ -60,10 +60,7 @@ static void formatSampleValue(char* buf, size_t sz,
 // Constructor / setChain
 // ─────────────────────────────────────────────────────────────────────────────
 
-IlaPanel::IlaPanel() {
-    std::snprintf(mask_buf_.data(), mask_buf_.size(), "FFFFFFFF");
-    std::snprintf(val_buf_.data(),  val_buf_.size(),  "00000000");
-}
+IlaPanel::IlaPanel() = default;
 
 IlaPanel::~IlaPanel() = default;
 
@@ -77,17 +74,25 @@ void IlaPanel::resetSignalDefs() {
     d.lo  = 0;
     d.fmt = BusFormat::HEX;
     signals_.push_back(d);
+    lane_triggers_.assign(1, LaneTrigger{});
 }
 
 std::vector<IlaSignalConfig> IlaPanel::exportSignalConfigs() const {
     std::vector<IlaSignalConfig> out;
     out.reserve(signals_.size());
-    for (const auto& s : signals_) {
+    for (size_t i = 0; i < signals_.size(); ++i) {
+        const auto& s = signals_[i];
         IlaSignalConfig c;
-        c.name = s.name;  // char[] -> string
-        c.hi   = s.hi;
-        c.lo   = s.lo;
-        c.fmt  = s.fmt;
+        c.name  = s.name;
+        c.hi    = s.hi;
+        c.lo    = s.lo;
+        c.fmt   = s.fmt;
+        if (i < lane_triggers_.size()) {
+            c.trig_cond   = static_cast<int>(lane_triggers_[i].cond);
+            c.trig_value  = lane_triggers_[i].value;
+            c.trig_cond_b  = static_cast<int>(lane_triggers_[i].cond_b);
+            c.trig_value_b = lane_triggers_[i].value_b;
+        }
         out.push_back(std::move(c));
     }
     return out;
@@ -96,7 +101,9 @@ std::vector<IlaSignalConfig> IlaPanel::exportSignalConfigs() const {
 void IlaPanel::importSignalConfigs(const std::vector<IlaSignalConfig>& cfgs) {
     if (cfgs.empty()) return;
     signals_.clear();
+    lane_triggers_.clear();
     signals_.reserve(cfgs.size());
+    lane_triggers_.reserve(cfgs.size());
     for (const auto& c : cfgs) {
         IlaSignalDef d{};
         std::snprintf(d.name, sizeof(d.name), "%s", c.name.c_str());
@@ -104,6 +111,12 @@ void IlaPanel::importSignalConfigs(const std::vector<IlaSignalConfig>& cfgs) {
         d.lo  = c.lo;
         d.fmt = c.fmt;
         signals_.push_back(d);
+        LaneTrigger lt{};
+        lt.cond    = static_cast<TriggerCond>(c.trig_cond);
+        lt.value   = c.trig_value;
+        lt.cond_b  = static_cast<TriggerCond>(c.trig_cond_b);
+        lt.value_b = c.trig_value_b;
+        lane_triggers_.push_back(lt);
     }
 }
 
@@ -139,6 +152,7 @@ void IlaPanel::setChain(jtag::JtagChain* chain, int device_index) {
                     d.fmt = static_cast<BusFormat>(e.fmt < 3 ? e.fmt : 0);
                     signals_.push_back(d);
                 }
+                lane_triggers_.assign(signals_.size(), LaneTrigger{});
                 loaded = true;
             }
         }
@@ -179,6 +193,7 @@ void IlaPanel::setBscaneChain(jtag::JtagChain* chain, int pl_tap_index) {
                     d.fmt = static_cast<BusFormat>(e.fmt < 3 ? e.fmt : 0);
                     signals_.push_back(d);
                 }
+                lane_triggers_.assign(signals_.size(), LaneTrigger{});
                 loaded = true;
             }
         }
@@ -188,15 +203,72 @@ void IlaPanel::setBscaneChain(jtag::JtagChain* chain, int pl_tap_index) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// computeTriggerRegisters
+// ─────────────────────────────────────────────────────────────────────────────
+
+void IlaPanel::computeTriggerRegisters(uint32_t& mask, uint32_t& value,
+                                        uint32_t& rise_mask,
+                                        uint32_t& fall_mask,
+                                        uint32_t& mask2, uint32_t& val2) const {
+    mask = value = rise_mask = fall_mask = mask2 = val2 = 0;
+    const int n = static_cast<int>(signals_.size());
+    for (int i = 0; i < n; ++i) {
+        const IlaSignalDef& sig = signals_[i];
+        const LaneTrigger& lt  = (i < static_cast<int>(lane_triggers_.size()))
+                                 ? lane_triggers_[i] : LaneTrigger{};
+        // Build lane bitmask for this signal's [hi:lo] range.
+        const int w = sig.width();
+        if (w <= 0 || sig.lo < 0) continue;
+        const uint32_t lane_bits = (w >= 32) ? 0xFFFF'FFFFu
+                                             : (((1u << w) - 1u) << sig.lo);
+        // --- Group A ---
+        switch (lt.cond) {
+            case TriggerCond::None:   break;
+            case TriggerCond::Eq:
+                mask  |= lane_bits;
+                value |= (lt.value << sig.lo) & lane_bits;
+                break;
+            case TriggerCond::Neq:
+                mask  |= lane_bits;
+                value |= (~(lt.value << sig.lo)) & lane_bits;
+                break;
+            case TriggerCond::Rise:
+                rise_mask |= lane_bits;
+                break;
+            case TriggerCond::Fall:
+                fall_mask |= lane_bits;
+                break;
+            case TriggerCond::Either:
+                rise_mask |= lane_bits;
+                fall_mask |= lane_bits;
+                break;
+        }
+        // --- Group B (Eq/Neq only; used in OR mode) ---
+        switch (lt.cond_b) {
+            case TriggerCond::None:  break;
+            case TriggerCond::Eq:
+                mask2 |= lane_bits;
+                val2  |= (lt.value_b << sig.lo) & lane_bits;
+                break;
+            case TriggerCond::Neq:
+                mask2 |= lane_bits;
+                val2  |= (~(lt.value_b << sig.lo)) & lane_bits;
+                break;
+            default: break;  // Rise/Fall/Either not supported in Group B
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Button handlers
 // ─────────────────────────────────────────────────────────────────────────────
 
 void IlaPanel::doArm() {
     if (!driverOk()) return;
-    uint32_t mask = parseHex(mask_buf_.data(), 0xFFFFFFFFu);
-    uint32_t val  = parseHex(val_buf_.data(),  0u);
-    auto     pre  = static_cast<uint16_t>(pre_samples_);
-    if (!driver_->configureTrigger(mask, val, pre)) {
+    uint32_t mask = 0, val = 0, rise = 0, fall = 0, m2 = 0, v2 = 0;
+    computeTriggerRegisters(mask, val, rise, fall, m2, v2);
+    auto pre = static_cast<uint16_t>(pre_samples_);
+    if (!driver_->configureTrigger(mask, val, rise, fall, m2, v2, or_mode_, pre)) {
         last_error_ = driver_->lastError();
         return;
     }
@@ -317,20 +389,42 @@ void IlaPanel::draw() {
 
     ImGui::Separator();
 
-    // ── Trigger config ───────────────────────────────────────────────
-    ImGui::Text("Trigger Mask (hex):");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(120);
-    if (ImGui::InputText("##mask", mask_buf_.data(), mask_buf_.size(),
-                         ImGuiInputTextFlags_CharsHexadecimal))
-        trigger_dirty_ = true;
-
-    ImGui::Text("Trigger Value(hex):");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(120);
-    if (ImGui::InputText("##val", val_buf_.data(), val_buf_.size(),
-                         ImGuiInputTextFlags_CharsHexadecimal))
-        trigger_dirty_ = true;
+    // ── Trigger config (computed from per-lane settings) ─────────────
+    {
+        uint32_t cm = 0, cv = 0, cr = 0, cf = 0, cm2 = 0, cv2 = 0;
+        computeTriggerRegisters(cm, cv, cr, cf, cm2, cv2);
+        ImGui::Text("Trigger:");
+        ImGui::SameLine();
+        // AND/OR radio buttons (disabled while armed/triggered)
+        const bool busy = hw_ok && status_valid_
+                          && (status_.armed || status_.triggered);
+        ImGui::BeginDisabled(busy);
+        bool and_mode = !or_mode_;
+        if (ImGui::RadioButton("AND", and_mode)) {
+            or_mode_       = false;
+            trigger_dirty_ = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("OR", or_mode_)) {
+            or_mode_       = true;
+            trigger_dirty_ = true;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("Mask=0x%08X  Value=0x%08X", cm, cv);
+        const bool has_edge = hw_ok && driver_->probed()
+                              && driver_->caps().version >= 2;
+        if (has_edge) {
+            ImGui::SameLine();
+            ImGui::TextDisabled(" Rise=0x%08X  Fall=0x%08X", cr, cf);
+        }
+        const bool has_or = hw_ok && driver_->probed()
+                            && driver_->caps().version >= 3;
+        if (has_or && or_mode_) {
+            ImGui::SameLine();
+            ImGui::TextDisabled(" B: Mask=0x%08X  Val=0x%08X", cm2, cv2);
+        }
+    }
 
     ImGui::Text("Pre-samples:      ");
     ImGui::SameLine();
@@ -405,7 +499,7 @@ void IlaPanel::draw() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void IlaPanel::drawSignalEditor() {
-    if (!ImGui::CollapsingHeader("Signal Definitions")) return;
+    if (!ImGui::CollapsingHeader("Signal Definitions & Trigger")) return;
 
     if (ImGui::SmallButton("Reset from CAPS")) resetSignalDefs();
     ImGui::SameLine();
@@ -418,27 +512,42 @@ void IlaPanel::drawSignalEditor() {
         d.lo  = 0;
         d.fmt = BusFormat::HEX;
         signals_.push_back(d);
+        lane_triggers_.emplace_back();
     }
 
     static const char* kFmtNames[] = {"HEX", "DEC", "BIN"};
+    static const char* kCondNames[] = {"None", "==", "!=", "Rise", "Fall", "Either"};
+    static const char* kCondNamesB[] = {"None", "==", "!="};  // Group B: level only
     constexpr ImGuiTableFlags kTblFlags =
         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
         ImGuiTableFlags_SizingFixedFit;
 
-    if (!ImGui::BeginTable("##sigdefs", 6, kTblFlags)) return;
+    // Column count: add 2 extra columns (Trig B / Val B) in OR mode.
+    const int n_cols = or_mode_ ? 10 : 8;
+    if (!ImGui::BeginTable("##sigdefs", n_cols, kTblFlags)) return;
 
-    ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 110.0f);
-    ImGui::TableSetupColumn("Hi",   ImGuiTableColumnFlags_WidthFixed,  36.0f);
-    ImGui::TableSetupColumn("Lo",   ImGuiTableColumnFlags_WidthFixed,  36.0f);
-    ImGui::TableSetupColumn("W",    ImGuiTableColumnFlags_WidthFixed,  28.0f);
-    ImGui::TableSetupColumn("Fmt",  ImGuiTableColumnFlags_WidthFixed,  52.0f);
-    ImGui::TableSetupColumn("",     ImGuiTableColumnFlags_WidthFixed,  20.0f);
+    ImGui::TableSetupColumn("Name",   ImGuiTableColumnFlags_WidthFixed, 110.0f);
+    ImGui::TableSetupColumn("Hi",     ImGuiTableColumnFlags_WidthFixed,  36.0f);
+    ImGui::TableSetupColumn("Lo",     ImGuiTableColumnFlags_WidthFixed,  36.0f);
+    ImGui::TableSetupColumn("W",      ImGuiTableColumnFlags_WidthFixed,  28.0f);
+    ImGui::TableSetupColumn("Fmt",    ImGuiTableColumnFlags_WidthFixed,  52.0f);
+    ImGui::TableSetupColumn("Trig A", ImGuiTableColumnFlags_WidthFixed,  72.0f);
+    ImGui::TableSetupColumn("Val A",  ImGuiTableColumnFlags_WidthFixed,  90.0f);
+    if (or_mode_) {
+        ImGui::TableSetupColumn("Trig B", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+        ImGui::TableSetupColumn("Val B",  ImGuiTableColumnFlags_WidthFixed, 90.0f);
+    }
+    ImGui::TableSetupColumn("",       ImGuiTableColumnFlags_WidthFixed,  20.0f);
     ImGui::TableHeadersRow();
 
     int to_remove = -1;
     const int n = static_cast<int>(signals_.size());
+    // Ensure lane_triggers_ stays in sync (safety net).
+    lane_triggers_.resize(static_cast<size_t>(n));
+
     for (int i = 0; i < n; i++) {
-        IlaSignalDef& s = signals_[i];
+        IlaSignalDef& s  = signals_[i];
+        LaneTrigger&  lt = lane_triggers_[static_cast<size_t>(i)];
         ImGui::TableNextRow();
         ImGui::PushID(i);
 
@@ -464,12 +573,75 @@ void IlaPanel::drawSignalEditor() {
             s.fmt = static_cast<BusFormat>(fi);
 
         ImGui::TableSetColumnIndex(5);
+        {
+            int ci = static_cast<int>(lt.cond);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::Combo("##cond", &ci, kCondNames, 6)) {
+                lt.cond = static_cast<TriggerCond>(ci);
+                trigger_dirty_ = true;
+            }
+        }
+
+        ImGui::TableSetColumnIndex(6);
+        {
+            const bool need_val = (lt.cond == TriggerCond::Eq ||
+                                   lt.cond == TriggerCond::Neq);
+            if (need_val) {
+                char vbuf[12];
+                std::snprintf(vbuf, sizeof(vbuf), "%X", lt.value);
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                if (ImGui::InputText("##tv", vbuf, sizeof(vbuf),
+                                     ImGuiInputTextFlags_CharsHexadecimal |
+                                     ImGuiInputTextFlags_AutoSelectAll)) {
+                    lt.value = parseHex(vbuf, lt.value);
+                    trigger_dirty_ = true;
+                }
+            } else {
+                ImGui::TextDisabled("--");
+            }
+        }
+
+        // Group B columns (visible in OR mode only)
+        if (or_mode_) {
+            ImGui::TableSetColumnIndex(7);
+            {
+                int ci = static_cast<int>(lt.cond_b);
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                if (ImGui::Combo("##condb", &ci, kCondNamesB, 3)) {
+                    lt.cond_b = static_cast<TriggerCond>(ci);
+                    trigger_dirty_ = true;
+                }
+            }
+
+            ImGui::TableSetColumnIndex(8);
+            {
+                const bool need_val = (lt.cond_b == TriggerCond::Eq ||
+                                       lt.cond_b == TriggerCond::Neq);
+                if (need_val) {
+                    char vbuf[12];
+                    std::snprintf(vbuf, sizeof(vbuf), "%X", lt.value_b);
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    if (ImGui::InputText("##tvb", vbuf, sizeof(vbuf),
+                                         ImGuiInputTextFlags_CharsHexadecimal |
+                                         ImGuiInputTextFlags_AutoSelectAll)) {
+                        lt.value_b = parseHex(vbuf, lt.value_b);
+                        trigger_dirty_ = true;
+                    }
+                } else {
+                    ImGui::TextDisabled("--");
+                }
+            }
+        }
+
+        ImGui::TableSetColumnIndex(or_mode_ ? 9 : 7);
         if (ImGui::SmallButton("X")) to_remove = i;
 
         ImGui::PopID();
     }
-    if (to_remove >= 0)
+    if (to_remove >= 0) {
         signals_.erase(signals_.begin() + to_remove);
+        lane_triggers_.erase(lane_triggers_.begin() + to_remove);
+    }
 
     ImGui::EndTable();
 }

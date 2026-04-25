@@ -114,9 +114,21 @@ bool IlaDriver::readSignalDefs(std::vector<IlaSignalEntry>& out) {
 }
 
 bool IlaDriver::configureTrigger(uint32_t mask, uint32_t value,
+                                   uint32_t rise_mask, uint32_t fall_mask,
+                                   uint32_t mask2, uint32_t val2, bool or_mode,
                                    uint16_t pre_samples) {
-    if (pre_samples >= depth()) {
+    if (pre_samples >= static_cast<uint16_t>(depth())) {
         last_error_ = "pre_samples must be < DEPTH";
+        return false;
+    }
+    // Legacy bitstream: edge registers not present.
+    if (caps_.version < 2 && (rise_mask != 0 || fall_mask != 0)) {
+        last_error_ = "edge trigger requires ILA IP version >= 2";
+        return false;
+    }
+    // OR-mode registers not present before version 3.
+    if (caps_.version < 3 && (mask2 != 0 || val2 != 0 || or_mode)) {
+        last_error_ = "OR-mode trigger requires ILA IP version >= 3";
         return false;
     }
     uint32_t dummy;
@@ -126,7 +138,33 @@ bool IlaDriver::configureTrigger(uint32_t mask, uint32_t value,
     if (!shiftDrInt(dataWidth(), value, dummy))  return false;
     if (!backend_.selectIr(kIrPreSamples)) { last_error_ = backend_.lastError(); return false; }
     if (!shiftDrInt(addrWidth(), pre_samples, dummy)) return false;
+    if (caps_.version >= 2) {
+        if (!backend_.selectIr(kIrTrigRise)) { last_error_ = backend_.lastError(); return false; }
+        if (!shiftDrInt(dataWidth(), rise_mask, dummy)) return false;
+        if (!backend_.selectIr(kIrTrigFall)) { last_error_ = backend_.lastError(); return false; }
+        if (!shiftDrInt(dataWidth(), fall_mask, dummy)) return false;
+    }
+    if (caps_.version >= 3) {
+        if (!backend_.selectIr(kIrTrigMask2)) { last_error_ = backend_.lastError(); return false; }
+        if (!shiftDrInt(dataWidth(), mask2, dummy)) return false;
+        if (!backend_.selectIr(kIrTrigVal2))  { last_error_ = backend_.lastError(); return false; }
+        if (!shiftDrInt(dataWidth(), val2,  dummy)) return false;
+        if (!backend_.selectIr(kIrTrigCtrl)) { last_error_ = backend_.lastError(); return false; }
+        if (!shiftDrInt(dataWidth(), or_mode ? 1u : 0u, dummy)) return false;
+    }
     return true;
+}
+
+bool IlaDriver::configureTrigger(uint32_t mask, uint32_t value,
+                                   uint32_t rise_mask, uint32_t fall_mask,
+                                   uint16_t pre_samples) {
+    return configureTrigger(mask, value, rise_mask, fall_mask,
+                            0u, 0u, false, pre_samples);
+}
+
+bool IlaDriver::configureTrigger(uint32_t mask, uint32_t value,
+                                   uint16_t pre_samples) {
+    return configureTrigger(mask, value, 0u, 0u, 0u, 0u, false, pre_samples);
 }
 
 bool IlaDriver::arm() {

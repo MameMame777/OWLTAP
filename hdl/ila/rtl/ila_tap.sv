@@ -45,6 +45,11 @@ module ila_tap #(
     output logic                ctrl_force_trig,
     output logic [DATA_W-1:0]   trig_mask,
     output logic [DATA_W-1:0]   trig_value,
+    output logic [DATA_W-1:0]   trig_rise_mask,
+    output logic [DATA_W-1:0]   trig_fall_mask,
+    output logic [DATA_W-1:0]   trig_mask2,
+    output logic [DATA_W-1:0]   trig_val2,
+    output logic                trig_or_mode,
     output logic [ADDR_W-1:0]   pre_samples,
 
     // Status inputs (in tck domain; pre-synchronized by ila_top)
@@ -122,7 +127,12 @@ module ila_tap #(
     localparam logic [IR_W-1:0] IR_TRIG_VAL    = 5'h0B;
     localparam logic [IR_W-1:0] IR_READ_ADDR   = 5'h0C;
     localparam logic [IR_W-1:0] IR_READ_DATA   = 5'h0D;
-    localparam logic [IR_W-1:0] IR_PRE_SAMPLES = 5'h0E;
+    localparam logic [IR_W-1:0] IR_PRE_SAMPLES  = 5'h0E;
+    localparam logic [IR_W-1:0] IR_TRIG_RISE   = 5'h0F;
+    localparam logic [IR_W-1:0] IR_TRIG_FALL   = 5'h10;
+    localparam logic [IR_W-1:0] IR_TRIG_MASK2  = 5'h11;
+    localparam logic [IR_W-1:0] IR_TRIG_VAL2   = 5'h12;
+    localparam logic [IR_W-1:0] IR_TRIG_CTRL   = 5'h13;  // bit[0]=or_mode
     localparam logic [IR_W-1:0] IR_BYPASS      = 5'h1F;
 
     logic [IR_W-1:0] ir_shift;
@@ -170,7 +180,7 @@ module ila_tap #(
     //   [15: 8] lo[7:0]   (inclusive LSB index, 0-based)
     //   [ 7: 0] name_idx  (0xFF = host auto-generates "data[hi:lo]")
     localparam logic [31:0] CONFIG_VAL = {
-        8'h01,
+        8'h03,           // VERSION 3: OR-mode trigger (TRIG_MASK2 / TRIG_VAL2 / TRIG_CTRL)
         4'(NUM_CH),
         4'(SIG_COUNT),
         6'(DATA_W - 1),
@@ -189,10 +199,16 @@ module ila_tap #(
     logic [7:0]          status_shift;
     logic [DATA_W-1:0]   mask_shift,  mask_reg;
     logic [DATA_W-1:0]   val_shift,   val_reg;
+    logic [DATA_W-1:0]   rise_shift,  rise_reg;
+    logic [DATA_W-1:0]   fall_shift,  fall_reg;
     logic [15:0]         pre_shift;
     logic [15:0]         pre_reg;
     logic [ADDR_W-1:0]   addr_shift, addr_reg;
     logic [DATA_W-1:0]   data_shift;
+    logic [DATA_W-1:0]   mask2_shift, mask2_reg;
+    logic [DATA_W-1:0]   val2_shift,  val2_reg;
+    logic [DATA_W-1:0]   tctrl_shift;  // bit[0] = or_mode
+    logic                or_mode_reg;
 
     // Control-plane pulses (asserted for one tck cycle after UPDATE_DR).
     logic ctrl_arm_r, ctrl_stop_r, ctrl_reset_r, ctrl_force_trig_r;
@@ -202,6 +218,11 @@ module ila_tap #(
     assign ctrl_force_trig = ctrl_force_trig_r;
     assign trig_mask       = mask_reg;
     assign trig_value      = val_reg;
+    assign trig_rise_mask  = rise_reg;
+    assign trig_fall_mask  = fall_reg;
+    assign trig_mask2      = mask2_reg;
+    assign trig_val2       = val2_reg;
+    assign trig_or_mode    = or_mode_reg;
     assign pre_samples     = pre_reg[ADDR_W-1:0];
     assign rd_addr         = addr_reg;
 
@@ -218,8 +239,18 @@ module ila_tap #(
             mask_reg          <= '0;
             val_shift         <= '0;
             val_reg           <= '0;
+            rise_shift        <= '0;
+            rise_reg          <= '0;
+            fall_shift        <= '0;
+            fall_reg          <= '0;
             pre_shift         <= '0;
             pre_reg           <= 16'(DEPTH/4);
+            mask2_shift       <= '0;
+            mask2_reg         <= '0;
+            val2_shift        <= '0;
+            val2_reg          <= '0;
+            tctrl_shift       <= '0;
+            or_mode_reg       <= 1'b0;
             addr_shift        <= '0;
             addr_reg          <= '0;
             data_shift        <= '0;
@@ -244,6 +275,11 @@ module ila_tap #(
                                                      sts_triggered, sts_armed};
                     IR_TRIG_MASK:   mask_shift   <= mask_reg;
                     IR_TRIG_VAL:    val_shift    <= val_reg;
+                    IR_TRIG_RISE:   rise_shift   <= rise_reg;
+                    IR_TRIG_FALL:   fall_shift   <= fall_reg;
+                    IR_TRIG_MASK2:  mask2_shift  <= mask2_reg;
+                    IR_TRIG_VAL2:   val2_shift   <= val2_reg;
+                    IR_TRIG_CTRL:   tctrl_shift  <= {{(DATA_W-1){1'b0}}, or_mode_reg};
                     IR_PRE_SAMPLES: pre_shift    <= pre_reg;
                     IR_READ_ADDR:   addr_shift   <= addr_reg;
                     IR_READ_DATA:   data_shift   <= rd_data;
@@ -259,6 +295,11 @@ module ila_tap #(
                     IR_STATUS:      status_shift <= {tdi, status_shift[7:1]};
                     IR_TRIG_MASK:   mask_shift   <= {tdi, mask_shift[DATA_W-1:1]};
                     IR_TRIG_VAL:    val_shift    <= {tdi, val_shift[DATA_W-1:1]};
+                    IR_TRIG_RISE:   rise_shift   <= {tdi, rise_shift[DATA_W-1:1]};
+                    IR_TRIG_FALL:   fall_shift   <= {tdi, fall_shift[DATA_W-1:1]};
+                    IR_TRIG_MASK2:  mask2_shift  <= {tdi, mask2_shift[DATA_W-1:1]};
+                    IR_TRIG_VAL2:   val2_shift   <= {tdi, val2_shift[DATA_W-1:1]};
+                    IR_TRIG_CTRL:   tctrl_shift  <= {tdi, tctrl_shift[DATA_W-1:1]};
                     IR_PRE_SAMPLES: pre_shift    <= {tdi, pre_shift[15:1]};
                     IR_READ_ADDR:   addr_shift   <= {tdi, addr_shift[ADDR_W-1:1]};
                     IR_READ_DATA:   data_shift   <= {tdi, data_shift[DATA_W-1:1]};
@@ -276,6 +317,11 @@ module ila_tap #(
                     end
                     IR_TRIG_MASK:   mask_reg <= mask_shift;
                     IR_TRIG_VAL:    val_reg  <= val_shift;
+                    IR_TRIG_RISE:   rise_reg <= rise_shift;
+                    IR_TRIG_FALL:   fall_reg <= fall_shift;
+                    IR_TRIG_MASK2:  mask2_reg    <= mask2_shift;
+                    IR_TRIG_VAL2:   val2_reg     <= val2_shift;
+                    IR_TRIG_CTRL:   or_mode_reg  <= tctrl_shift[0];
                     IR_PRE_SAMPLES: pre_reg  <= pre_shift;
                     IR_READ_ADDR:   addr_reg <= addr_shift;
                     IR_READ_DATA:   addr_reg <= addr_reg + 1'b1; // auto-inc
@@ -305,6 +351,11 @@ module ila_tap #(
                 IR_STATUS:      tdo_d = status_shift[0];
                 IR_TRIG_MASK:   tdo_d = mask_shift[0];
                 IR_TRIG_VAL:    tdo_d = val_shift[0];
+                IR_TRIG_RISE:   tdo_d = rise_shift[0];
+                IR_TRIG_FALL:   tdo_d = fall_shift[0];
+                IR_TRIG_MASK2:  tdo_d = mask2_shift[0];
+                IR_TRIG_VAL2:   tdo_d = val2_shift[0];
+                IR_TRIG_CTRL:   tdo_d = tctrl_shift[0];
                 IR_PRE_SAMPLES: tdo_d = pre_shift[0];
                 IR_READ_ADDR:   tdo_d = addr_shift[0];
                 IR_READ_DATA:   tdo_d = data_shift[0];

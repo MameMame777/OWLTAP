@@ -39,8 +39,8 @@ private:
     void beginFrame();
     void endFrame();
     void buildDockspace();
-    static void applyTheme();
     void buildMenuBar();
+    void buildStatusBar();
     void initializeDockLayout(unsigned int dockspace_id);
     void drawPinControlPanel();
     void drawScriptRunnerPanel();
@@ -93,6 +93,7 @@ private:
     int  help_topic_ = 0;
     std::string status_text_ = "Disconnected";
     bool dock_layout_initialized_ = false;
+    bool reset_layout_requested_ = false;
 
     // Backend objects (constructed in dependency order)
     std::unique_ptr<jtag::FtdiDevice> ftdi_;

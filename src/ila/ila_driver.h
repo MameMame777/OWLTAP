@@ -83,6 +83,11 @@ public:
         kIrReadAddr    = 0x0C,
         kIrReadData    = 0x0D,
         kIrPreSamples  = 0x0E,
+        kIrTrigRise    = 0x0F,  ///< TRIG_RISE_MASK (version >= 2)
+        kIrTrigFall    = 0x10,  ///< TRIG_FALL_MASK (version >= 2)
+        kIrTrigMask2   = 0x11,  ///< TRIG_MASK2 — Group B level mask (version >= 3)
+        kIrTrigVal2    = 0x12,  ///< TRIG_VAL2  — Group B level value (version >= 3)
+        kIrTrigCtrl    = 0x13,  ///< TRIG_CTRL  — bit[0]=or_mode (version >= 3)
         kIrBypass      = 0x1F,
     };
 
@@ -106,7 +111,24 @@ public:
     /// Read `caps().sig_count` signal-lane definitions from SIG_DEF (IR 5'h03).
     /// Returns false (and sets lastError()) if sig_count is 0 or a JTAG error occurs.
     bool readSignalDefs(std::vector<IlaSignalEntry>& out);
+
+    /// Configure trigger: level match (mask/value), edge match (rise/fall bitmasks),
+    /// OR-mode second group (mask2/val2), or_mode flag, and pre-trigger depth.
+    /// Rise/fall/mask2/val2/or_mode registers are skipped for older bitstreams;
+    /// using non-zero values on an incompatible version sets lastError() and returns false.
+    bool configureTrigger(uint32_t mask, uint32_t value,
+                          uint32_t rise_mask, uint32_t fall_mask,
+                          uint32_t mask2, uint32_t val2, bool or_mode,
+                          uint16_t pre_samples);
+
+    /// 5-arg overload: calls 8-arg form with mask2=0, val2=0, or_mode=false.
+    bool configureTrigger(uint32_t mask, uint32_t value,
+                          uint32_t rise_mask, uint32_t fall_mask,
+                          uint16_t pre_samples);
+
+    /// Legacy 3-arg overload: calls 8-arg form with rise=fall=mask2=val2=0, or_mode=false.
     bool configureTrigger(uint32_t mask, uint32_t value, uint16_t pre_samples);
+
     bool arm();
     bool stop();
     bool resetCapture();

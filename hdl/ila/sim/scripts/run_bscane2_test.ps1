@@ -10,8 +10,12 @@
 #   .\run_bscane2_test.ps1 -Regression
 #
 # Tests:
-#   ila_bscane2_smoke_test    -- IDCODE read via USER1 + 37-bit frame
-#   ila_bscane2_trigger_test  -- trigger match + full buffer readback
+#   ila_bscane2_smoke_test         -- IDCODE read via USER1 + 37-bit frame
+#   ila_bscane2_config_read_test   -- CONFIG register fields + version check
+#   ila_bscane2_sig_def_test        -- SIG_DEF ROM entry readback (VERSION 3)
+#   ila_bscane2_trigger_test        -- trigger match + full buffer readback
+#   ila_bscane2_edge_trigger_test  -- rising/falling edge trigger (VERSION 2)
+#   ila_bscane2_or_trigger_test    -- OR-mode / Group B trigger (VERSION 3)
 #==============================================================================
 
 param(
@@ -42,7 +46,10 @@ Usage: .\run_bscane2_test.ps1 <test_name> [options]
 Tests:
   ila_bscane2_smoke_test
   ila_bscane2_config_read_test
+  ila_bscane2_sig_def_test
   ila_bscane2_trigger_test
+  ila_bscane2_edge_trigger_test
+  ila_bscane2_or_trigger_test
 "@
     exit 0
 }
@@ -144,7 +151,7 @@ function Run-OneTest {
 Setup-Environment
 
 if ($Regression) {
-    $tests = @("ila_bscane2_smoke_test", "ila_bscane2_config_read_test", "ila_bscane2_trigger_test")
+    $tests = @("ila_bscane2_smoke_test", "ila_bscane2_config_read_test", "ila_bscane2_sig_def_test", "ila_bscane2_trigger_test", "ila_bscane2_edge_trigger_test", "ila_bscane2_or_trigger_test")
     $results = @()
     foreach ($t in $tests) {
         $results += Run-OneTest -Name $t

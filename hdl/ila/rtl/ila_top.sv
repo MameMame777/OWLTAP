@@ -56,6 +56,9 @@ module ila_top #(
     logic                ctrl_arm_tck, ctrl_stop_tck;
     logic                ctrl_reset_tck, ctrl_force_trig_tck;
     logic [DATA_W-1:0]   trig_mask_tck, trig_value_tck;
+    logic [DATA_W-1:0]   trig_rise_mask_tck, trig_fall_mask_tck;
+    logic [DATA_W-1:0]   trig_mask2_tck, trig_val2_tck;
+    logic                trig_or_mode_tck;
     logic [ADDR_W-1:0]   pre_samples_tck;
 
     logic                sts_armed_tck;
@@ -88,6 +91,11 @@ module ila_top #(
         .ctrl_force_trig (ctrl_force_trig_tck),
         .trig_mask       (trig_mask_tck),
         .trig_value      (trig_value_tck),
+        .trig_rise_mask  (trig_rise_mask_tck),
+        .trig_fall_mask  (trig_fall_mask_tck),
+        .trig_mask2      (trig_mask2_tck),
+        .trig_val2       (trig_val2_tck),
+        .trig_or_mode    (trig_or_mode_tck),
         .pre_samples     (pre_samples_tck),
         .sts_armed       (sts_armed_tck),
         .sts_triggered   (sts_triggered_tck),
@@ -125,16 +133,31 @@ module ila_top #(
     (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] mask_sc_m, mask_sc;
     (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] val_sc_m, val_sc;
     (* ASYNC_REG = "TRUE" *) logic [ADDR_W-1:0] pre_sc_m, pre_sc;
+    (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] rise_sc_m, rise_sc;
+    (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] fall_sc_m, fall_sc;
+    (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] mask2_sc_m, mask2_sc;
+    (* ASYNC_REG = "TRUE" *) logic [DATA_W-1:0] val2_sc_m, val2_sc;
+    (* ASYNC_REG = "TRUE" *) logic              or_mode_sc_m, or_mode_sc;
 
     always_ff @(posedge sample_clk or negedge sample_rst_n) begin
         if (!sample_rst_n) begin
             mask_sc_m <= '0; mask_sc <= '0;
             val_sc_m  <= '0; val_sc  <= '0;
             pre_sc_m  <= '0; pre_sc  <= '0;
+            rise_sc_m <= '0; rise_sc <= '0;
+            fall_sc_m <= '0; fall_sc <= '0;
+            mask2_sc_m    <= '0; mask2_sc    <= '0;
+            val2_sc_m     <= '0; val2_sc     <= '0;
+            or_mode_sc_m  <= 1'b0; or_mode_sc <= 1'b0;
         end else begin
-            mask_sc_m <= trig_mask_tck;   mask_sc <= mask_sc_m;
-            val_sc_m  <= trig_value_tck;  val_sc  <= val_sc_m;
-            pre_sc_m  <= pre_samples_tck; pre_sc  <= pre_sc_m;
+            mask_sc_m <= trig_mask_tck;       mask_sc <= mask_sc_m;
+            val_sc_m  <= trig_value_tck;      val_sc  <= val_sc_m;
+            pre_sc_m  <= pre_samples_tck;     pre_sc  <= pre_sc_m;
+            rise_sc_m <= trig_rise_mask_tck;  rise_sc <= rise_sc_m;
+            fall_sc_m <= trig_fall_mask_tck;  fall_sc <= fall_sc_m;
+            mask2_sc_m   <= trig_mask2_tck;   mask2_sc   <= mask2_sc_m;
+            val2_sc_m    <= trig_val2_tck;    val2_sc    <= val2_sc_m;
+            or_mode_sc_m <= trig_or_mode_tck; or_mode_sc <= or_mode_sc_m;
         end
     end
 
@@ -153,6 +176,11 @@ module ila_top #(
         .valid_in (data_valid),
         .mask     (mask_sc),
         .value    (val_sc),
+        .rise_mask(rise_sc),
+        .fall_mask(fall_sc),
+        .mask2    (mask2_sc),
+        .val2     (val2_sc),
+        .or_mode  (or_mode_sc),
         .match    (trig_match_sc)
     );
 

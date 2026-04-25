@@ -25,9 +25,13 @@ struct BusDefinition {
 /// captured data word).  hi/lo are inclusive 0-based bit indices.
 struct IlaSignalConfig {
     std::string name;
-    int         hi  = 0;
-    int         lo  = 0;
-    BusFormat   fmt = BusFormat::HEX;
+    int         hi          = 0;
+    int         lo          = 0;
+    BusFormat   fmt         = BusFormat::HEX;
+    int         trig_cond   = 0;   ///< TriggerCond cast to int (0 = None); Group A
+    uint32_t    trig_value  = 0;   ///< only used when trig_cond is Eq or Neq; Group A
+    int         trig_cond_b = 0;   ///< TriggerCond for Group B (None/Eq/Neq only)
+    uint32_t    trig_value_b = 0;  ///< Group B match value
 };
 
 /// Persistent application settings saved to/loaded from cfg.json.
@@ -51,6 +55,7 @@ struct AppConfig {
 
     // ILA signal lane definitions (per-lane bit-field slicing)
     std::vector<IlaSignalConfig> ila_signals;
+    bool ila_or_mode = false;  ///< Trigger OR mode (false = AND)
 
     // XDC pin alias file (optional)
     std::string xdc_path;

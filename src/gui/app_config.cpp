@@ -189,6 +189,11 @@ static std::vector<IlaSignalConfig> jsonIlaSignalArray(const std::string& json,
         else if (fmt_str == "BIN") s.fmt = BusFormat::BIN;
         else s.fmt = BusFormat::HEX;
 
+        s.trig_cond   = static_cast<int>(jsonInt(obj, "trig_cond",   0));
+        s.trig_value  = static_cast<uint32_t>(jsonInt(obj, "trig_value",  0));
+        s.trig_cond_b  = static_cast<int>(jsonInt(obj, "trig_cond_b",  0));
+        s.trig_value_b = static_cast<uint32_t>(jsonInt(obj, "trig_value_b", 0));
+
         result.push_back(std::move(s));
     }
     return result;
@@ -250,7 +255,11 @@ bool AppConfig::save(const std::string& path) const {
         f << "    {\"name\":\"" << jsonEscape(s.name) << "\","
           << "\"hi\":" << s.hi << ","
           << "\"lo\":" << s.lo << ","
-          << "\"fmt\":\"" << fmt_str << "\"}";
+          << "\"fmt\":\"" << fmt_str << "\","
+          << "\"trig_cond\":" << s.trig_cond << ","
+          << "\"trig_value\":" << s.trig_value << ","
+          << "\"trig_cond_b\":" << s.trig_cond_b << ","
+          << "\"trig_value_b\":" << s.trig_value_b << "}";
         if (i + 1 < ila_signals.size()) f << ",";
         f << "\n";
     }
@@ -258,7 +267,8 @@ bool AppConfig::save(const std::string& path) const {
     f << "],\n";
 
     // XDC pin alias file
-    f << "  \"xdc_path\": \"" << jsonEscape(xdc_path) << "\"\n";
+    f << "  \"xdc_path\": \"" << jsonEscape(xdc_path) << "\",\n";
+    f << "  \"ila_or_mode\": " << (ila_or_mode ? 1 : 0) << "\n";
     f << "}\n";
     return f.good();
 }
@@ -283,6 +293,7 @@ AppConfig AppConfig::load(const std::string& path) {
     cfg.buses             = jsonBusArray(json, "buses");
     cfg.ila_signals       = jsonIlaSignalArray(json, "ila_signals");
     cfg.xdc_path          = jsonString(json, "xdc_path");
+    cfg.ila_or_mode       = (jsonInt(json, "ila_or_mode", 0) != 0);
     return cfg;
 }
 

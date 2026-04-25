@@ -21,6 +21,24 @@ class JtagChain;
 
 namespace jtag::gui {
 
+/// Per-signal-lane trigger condition selector.
+enum class TriggerCond {
+    None   = 0,  ///< Lane excluded from trigger
+    Eq     = 1,  ///< (data & lane_bits) == trig_value
+    Neq    = 2,  ///< (data & lane_bits) != trig_value
+    Rise   = 3,  ///< Rising edge on any bit in lane
+    Fall   = 4,  ///< Falling edge on any bit in lane
+    Either = 5,  ///< Either edge on any bit in lane
+};
+
+/// Per-lane trigger configuration (mirrored in IlaSignalConfig for persistence).
+struct LaneTrigger {
+    TriggerCond cond    = TriggerCond::None;  ///< Group A condition
+    uint32_t    value   = 0;                  ///< Group A value (Eq/Neq only)
+    TriggerCond cond_b  = TriggerCond::None;  ///< Group B condition (None/Eq/Neq only)
+    uint32_t    value_b = 0;                  ///< Group B value (Eq/Neq only)
+};
+
 /// Describes a named bit-field slice of the ILA captured data word.
 ///
 /// hi and lo are inclusive bit indices (0 = LSB).  When width() == 1 the lane
@@ -89,6 +107,10 @@ public:
     /// RTL SIG_DEF register during the last setBscaneChain()/setChain() call.
     bool hasSigDefsFromRtl() const { return rtl_sig_defs_loaded_; }
 
+    /// OR mode accessors (used by AppWindow to persist the setting).
+    bool orMode() const     { return or_mode_; }
+    void setOrMode(bool v)  { or_mode_ = v; }
+
 private:
     void doArm();
     void doStop();
@@ -100,6 +122,12 @@ private:
     void drawSignalEditor();   // collapsible lane-definition table
     void resetSignalDefs();    // populate default from IlaCaps.data_w
 
+    /// Compute hardware trigger registers from per-lane settings.
+    /// Produces Group A (mask/value/rise/fall) and Group B (mask2/val2).
+    void computeTriggerRegisters(uint32_t& mask, uint32_t& value,
+                                  uint32_t& rise_mask, uint32_t& fall_mask,
+                                  uint32_t& mask2, uint32_t& val2) const;
+
     bool driverOk() const { return driver_ != nullptr; }
 
     // ILA backend
@@ -107,10 +135,9 @@ private:
     std::unique_ptr<jtag::ila::IlaDriver>     driver_;
 
     // Trigger config UI state
-    std::array<char, 11> mask_buf_{};
-    std::array<char, 11> val_buf_{};
     int                  pre_samples_   = jtag::ila::IlaDriver::kDepth / 4;
     bool                 trigger_dirty_ = false;
+    bool                 or_mode_       = false;  ///< OR mode toggle
 
     // Status
     jtag::ila::IlaStatus status_{};
@@ -125,14 +152,15 @@ private:
     std::vector<double>    wave_x_;
 
     // Signal lane definitions (auto-populated from probe(); user-editable)
-    std::vector<IlaSignalDef> signals_;
-    bool                      rtl_sig_defs_loaded_ = false; // true when SIG_DEF read from RTL
+    std::vector<IlaSignalDef>  signals_;
+    std::vector<LaneTrigger>   lane_triggers_;  // size always == signals_.size()
+    bool                       rtl_sig_defs_loaded_ = false;
 
     // Poll timer
     double last_poll_time_ = 0.0;
 
     SampleCallback sample_cb_;
-    bool           visible_ = false;
+    bool           visible_ = true;
 };
 
 } // namespace jtag::gui

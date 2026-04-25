@@ -39,6 +39,7 @@ package ila_bscane2_test_pkg;
     // 5-bit sub-opcodes (ILA registers inside BSCANE2 frame)
     localparam logic [4:0] IR_IDCODE      = 5'h01;
     localparam logic [4:0] IR_CONFIG      = 5'h02;
+    localparam logic [4:0] IR_SIG_DEF     = 5'h03;  // Signal definition ROM
     localparam logic [4:0] IR_CTRL        = 5'h08;
     localparam logic [4:0] IR_STATUS      = 5'h09;
     localparam logic [4:0] IR_TRIG_MASK   = 5'h0A;
@@ -46,6 +47,11 @@ package ila_bscane2_test_pkg;
     localparam logic [4:0] IR_READ_ADDR   = 5'h0C;
     localparam logic [4:0] IR_READ_DATA   = 5'h0D;
     localparam logic [4:0] IR_PRE_SAMPLES = 5'h0E;
+    localparam logic [4:0] IR_TRIG_RISE   = 5'h0F;  // VERSION 2: edge trigger
+    localparam logic [4:0] IR_TRIG_FALL   = 5'h10;
+    localparam logic [4:0] IR_TRIG_MASK2  = 5'h11;  // VERSION 3: OR-mode Group B
+    localparam logic [4:0] IR_TRIG_VAL2   = 5'h12;
+    localparam logic [4:0] IR_TRIG_CTRL   = 5'h13;
 
     // STATUS DR bit positions
     localparam int STATUS_ARMED     = 0;
@@ -311,6 +317,12 @@ package ila_bscane2_test_pkg;
             cfg = r;
         endtask
 
+        task ila_read_sig_def(output bit [31:0] word);
+            logic [31:0] r;
+            ila_read(IR_SIG_DEF, r);
+            word = r;
+        endtask
+
         task ila_read_status(output bit [7:0] status);
             logic [31:0] r;
             ila_read(IR_STATUS, r);
@@ -355,6 +367,29 @@ package ila_bscane2_test_pkg;
                 frame(IR_READ_DATA, '0, tdo);
                 samples.push_back(tdo[36:5]);
             end
+        endtask
+
+        // ---- Edge-trigger helpers (VERSION 2 only) ------------------
+        task ila_set_rise_mask(logic [31:0] rise);
+            ila_write(IR_TRIG_RISE, rise);
+        endtask
+
+        task ila_set_fall_mask(logic [31:0] fall);
+            ila_write(IR_TRIG_FALL, fall);
+        endtask
+
+        // ---- OR-mode helpers (VERSION 3 only) -----------------------
+        task ila_set_mask2(logic [31:0] mask);
+            ila_write(IR_TRIG_MASK2, mask);
+        endtask
+
+        task ila_set_val2(logic [31:0] val);
+            ila_write(IR_TRIG_VAL2, val);
+        endtask
+
+        // or_mode: 1 = OR mode, 0 = AND mode (default)
+        task ila_set_trig_ctrl(bit or_mode);
+            ila_write(IR_TRIG_CTRL, {31'h0, or_mode});
         endtask
 
         task ila_wait_full(int unsigned max_tries = 20000);
@@ -447,6 +482,7 @@ package ila_bscane2_test_pkg;
             bit [31:0] cfg;
             bit [7:0]  version;
             bit [3:0]  num_ch;
+            bit [3:0]  sig_count;
             bit [5:0]  data_w_m1;
             bit [7:0]  addr_w;
 
@@ -458,16 +494,17 @@ package ila_bscane2_test_pkg;
 
             version   = cfg[31:24];
             num_ch    = cfg[23:20];
+            sig_count = cfg[19:16];
             data_w_m1 = cfg[15:10];
             addr_w    = cfg[ 7: 0];
 
             `uvm_info("CONFIG",
-                $sformatf("raw=0x%08h version=%0d num_ch=%0d data_w=%0d addr_w=%0d",
-                          cfg, version, num_ch, data_w_m1+1, addr_w), UVM_LOW)
+                $sformatf("raw=0x%08h version=%0d num_ch=%0d sig_count=%0d data_w=%0d addr_w=%0d",
+                          cfg, version, num_ch, sig_count, data_w_m1+1, addr_w), UVM_LOW)
 
-            if (version !== 8'h01)
+            if (version !== 8'h03)
                 `uvm_error("CONFIG_VER",
-                    $sformatf("expected version 0x01 got 0x%02h", version))
+                    $sformatf("expected version 0x03 got 0x%02h", version))
             if (num_ch !== 4'd1)
                 `uvm_error("CONFIG_NUMCH",
                     $sformatf("expected num_ch=1 got %0d", num_ch))
@@ -477,6 +514,9 @@ package ila_bscane2_test_pkg;
             if (addr_w !== ILA_ADDR_W)
                 `uvm_error("CONFIG_ADDRW",
                     $sformatf("expected ADDR_W=%0d got %0d", ILA_ADDR_W, addr_w))
+            if (sig_count !== 4'd1)
+                `uvm_error("CONFIG_SIGCOUNT",
+                    $sformatf("expected sig_count=1 got %0d", sig_count))
         endtask
     endclass
 
@@ -526,6 +566,247 @@ package ila_bscane2_test_pkg;
                     $sformatf("read %0d samples; first=0x%08h last=0x%08h",
                               samples.size(), samples[0],
                               samples[samples.size()-1]), UVM_LOW)
+        endtask
+    endclass
+
+    // ------------------------------------------------------------------
+    // Test 3: edge trigger — rising edge on data[8] (counter bit 8)
+    //   Counter bit 8 toggles every 256 cycles.  With 125 MHz sample_clk
+    //   the first rising edge on bit 8 occurs at cycle 256 (~2 us), well
+    //   inside the 10 ms simulation watchdog.
+    // ------------------------------------------------------------------
+    class ila_bscane2_edge_trigger_test extends ila_bscane2_base_test;
+        `uvm_component_utils(ila_bscane2_edge_trigger_test)
+        function new(string name, uvm_component parent);
+            super.new(name,parent); endfunction
+
+        virtual task body(uvm_phase phase);
+            ila_bscane2_seq seq = ila_bscane2_seq::type_id::create("seq");
+            bit [ILA_DATA_W-1:0] samples[$];
+            bit [7:0] st;
+            bit [31:0] cfg;
+            bit [7:0]  version;
+
+            seq.start(env.agent.sequencer);
+            seq.wait_reset_done();
+            seq.reset_tap();
+            seq.load_user1();
+
+            // Verify firmware version supports edge trigger.
+            seq.ila_read_config(cfg);
+            version = cfg[31:24];
+            if (version < 8'h02) begin
+                `uvm_error("EDGE_VER",
+                    $sformatf("edge trigger requires version>=2, got 0x%02h", version))
+                return;
+            end
+
+            // --- Sub-test A: rising edge on bit 8 (no level mask) ---
+            `uvm_info("EDGE","Sub-test A: rise on data[8]", UVM_LOW)
+            seq.ila_set_mask(32'h0);          // level mask disabled
+            seq.ila_set_value(32'h0);
+            seq.ila_set_rise_mask(32'h0000_0100);  // bit 8
+            seq.ila_set_fall_mask(32'h0);          // fall disabled
+            seq.ila_set_pre_samples(10'(ILA_DEPTH/8));
+            seq.ila_ctrl(.arm(1),.stop(0),.reset(0),.force_trig(0));
+            seq.ila_wait_full();
+            seq.ila_read_status(st);
+
+            if (!st[STATUS_TRIGGERED])
+                `uvm_error("EDGE_A_NOTRIG","triggered bit not set after rising-edge arm")
+            else
+                `uvm_info("EDGE","Sub-test A PASSED: rising edge triggered correctly", UVM_LOW)
+
+            // --- Sub-test B: falling edge on bit 8 ---
+            `uvm_info("EDGE","Sub-test B: fall on data[8]", UVM_LOW)
+            seq.ila_ctrl(.arm(0),.stop(0),.reset(1),.force_trig(0));  // reset
+            seq.ila_set_rise_mask(32'h0);
+            seq.ila_set_fall_mask(32'h0000_0100);  // bit 8 falling
+            seq.ila_ctrl(.arm(1),.stop(0),.reset(0),.force_trig(0));
+            seq.ila_wait_full();
+            seq.ila_read_status(st);
+
+            if (!st[STATUS_TRIGGERED])
+                `uvm_error("EDGE_B_NOTRIG","triggered bit not set after falling-edge arm")
+            else
+                `uvm_info("EDGE","Sub-test B PASSED: falling edge triggered correctly", UVM_LOW)
+
+            // --- Sub-test C: Either edge on bit 1 (fires every 2 cycles) ---
+            `uvm_info("EDGE","Sub-test C: either edge on data[1]", UVM_LOW)
+            seq.ila_ctrl(.arm(0),.stop(0),.reset(1),.force_trig(0));
+            seq.ila_set_rise_mask(32'h0000_0002);  // bit 1
+            seq.ila_set_fall_mask(32'h0000_0002);  // bit 1 — either edge
+            seq.ila_ctrl(.arm(1),.stop(0),.reset(0),.force_trig(0));
+            seq.ila_wait_full();
+            seq.ila_read_status(st);
+
+            if (!st[STATUS_TRIGGERED])
+                `uvm_error("EDGE_C_NOTRIG",
+                    "triggered bit not set for either-edge trigger on data[1]")
+            else
+                `uvm_info("EDGE","Sub-test C PASSED: either-edge triggered correctly", UVM_LOW)
+        endtask
+    endclass
+
+    // ------------------------------------------------------------------
+    // Test 4: OR-mode trigger
+    //   Group A: mask=0xFF,   val=0x42  (data[7:0] == 0x42)
+    //   Group B: mask2=0xFF,  val2=0x55 (data[7:0] == 0x55)
+    //   Sub-test A: or_mode=1, counter reaches 0x42 → triggered
+    //   Sub-test B: or_mode=1, reset, counter reaches 0x55 → triggered
+    //   Sub-test C: or_mode=0 (AND), only data[7:0] matching BOTH simultaneously
+    //               is impossible with a monotone counter → use force_trig to
+    //               confirm AND mode does NOT fire on 0x42 or 0x55 alone, then
+    //               force to confirm the capture path works.
+    // ------------------------------------------------------------------
+    class ila_bscane2_or_trigger_test extends ila_bscane2_base_test;
+        `uvm_component_utils(ila_bscane2_or_trigger_test)
+        function new(string name, uvm_component parent);
+            super.new(name,parent); endfunction
+
+        virtual task body(uvm_phase phase);
+            ila_bscane2_seq seq = ila_bscane2_seq::type_id::create("seq");
+            bit [7:0] st;
+            bit [31:0] cfg;
+            bit [7:0]  version;
+
+            seq.start(env.agent.sequencer);
+            seq.wait_reset_done();
+            seq.reset_tap();
+            seq.load_user1();
+
+            // Verify firmware version supports OR-mode trigger.
+            seq.ila_read_config(cfg);
+            version = cfg[31:24];
+            if (version < 8'h03) begin
+                `uvm_error("OR_VER",
+                    $sformatf("OR-mode trigger requires version>=3, got 0x%02h", version))
+                return;
+            end
+
+            // ---- Common register setup ----
+            seq.ila_set_mask  (32'h0000_00FF);   // Group A: bit[7:0]
+            seq.ila_set_value (32'h0000_0042);   // Group A: value 0x42
+            seq.ila_set_rise_mask(32'h0);
+            seq.ila_set_fall_mask(32'h0);
+            seq.ila_set_mask2 (32'h0000_00FF);   // Group B: bit[7:0]
+            seq.ila_set_val2  (32'h0000_0055);   // Group B: value 0x55
+            seq.ila_set_pre_samples(10'(ILA_DEPTH/8));
+
+            // ---- Sub-test A: OR mode, expect trigger at counter == 0x42 ----
+            `uvm_info("OR_TRIG","Sub-test A: OR mode, Group A fires at 0x42", UVM_LOW)
+            seq.ila_set_trig_ctrl(1'b1);   // or_mode = 1
+            seq.ila_ctrl(.arm(1),.stop(0),.reset(0),.force_trig(0));
+            seq.ila_wait_full();
+            seq.ila_read_status(st);
+
+            if (!st[STATUS_TRIGGERED])
+                `uvm_error("OR_A_NOTRIG",
+                    "Sub-test A: triggered bit not set (expected Group A to fire at 0x42)")
+            else
+                `uvm_info("OR_TRIG","Sub-test A PASSED: OR mode fired on Group A", UVM_LOW)
+
+            // ---- Sub-test B: OR mode, expect trigger at counter == 0x55 ----
+            // Reset and re-arm.  Because counter is free-running from reset, it
+            // will pass 0x55 before 0x42 only when the counter wraps (256 cycles
+            // after 0x42 if it has not been reset).  We reset the ILA capture
+            // and re-arm; the counter itself is NOT reset so it continues from
+            // where it was.  Group A at 0x42 would have already passed if
+            // counter > 0x42; Group B at 0x55 will fire next.
+            // Swap A/B values to ensure Group B fires first after a reset.
+            `uvm_info("OR_TRIG","Sub-test B: OR mode, Group B fires at 0x55", UVM_LOW)
+            seq.ila_ctrl(.arm(0),.stop(0),.reset(1),.force_trig(0));
+            // Set Group A to an unreachable value (0xAA), Group B stays 0x55
+            seq.ila_set_value (32'h0000_00AA);   // Group A: unreachable in 8-bit window
+            seq.ila_set_trig_ctrl(1'b1);         // or_mode = 1 (keep)
+            seq.ila_ctrl(.arm(1),.stop(0),.reset(0),.force_trig(0));
+            seq.ila_wait_full();
+            seq.ila_read_status(st);
+
+            if (!st[STATUS_TRIGGERED])
+                `uvm_error("OR_B_NOTRIG",
+                    "Sub-test B: triggered bit not set (expected Group B to fire at 0x55)")
+            else
+                `uvm_info("OR_TRIG","Sub-test B PASSED: OR mode fired on Group B", UVM_LOW)
+
+            // ---- Sub-test C: AND mode (or_mode=0), impossible condition ---
+            // Group A: data[7:0]==0x42, Group B: data[7:0]==0x55  (AND = both)
+            // A monotone 8-bit counter can never be both 0x42 and 0x55 simultaneously.
+            // After arming we wait a bounded time and verify NOT triggered.
+            // Then force-trigger to confirm the ILA capture path still works.
+            `uvm_info("OR_TRIG","Sub-test C: AND mode, impossible condition — should NOT trigger", UVM_LOW)
+            seq.ila_ctrl(.arm(0),.stop(0),.reset(1),.force_trig(0));
+            seq.ila_set_value (32'h0000_0042);   // Group A: 0x42
+            seq.ila_set_trig_ctrl(1'b0);         // or_mode = 0 (AND)
+            seq.ila_ctrl(.arm(1),.stop(0),.reset(0),.force_trig(0));
+
+            // Wait ~100 JTAG-status polls; the counter will have wrapped multiple times
+            // but AND-mode should never fire because both conditions can't be true
+            // at the same sample.  100 × ~5 us ≈ 500 us budget (well under 10 ms watchdog).
+            begin
+                int unsigned polls;
+                for (polls = 0; polls < 100; polls++) begin
+                    seq.ila_read_status(st);
+                    if (st[STATUS_TRIGGERED]) break;
+                end
+                if (st[STATUS_TRIGGERED])
+                    `uvm_error("OR_C_SPURIOUS",
+                        "Sub-test C: AND mode spuriously triggered — logic error in RTL")
+                else
+                    `uvm_info("OR_TRIG",
+                        "Sub-test C PASSED: AND mode correctly did NOT trigger", UVM_LOW)
+            end
+
+            // Force-trigger to confirm capture still works in AND mode.
+            seq.ila_ctrl(.arm(0),.stop(0),.reset(0),.force_trig(1));
+            seq.ila_wait_full(.max_tries(20000));
+            seq.ila_read_status(st);
+            if (!st[STATUS_FULL])
+                `uvm_error("OR_C_FORCE","Sub-test C: force trigger did not produce full capture")
+            else
+                `uvm_info("OR_TRIG","Sub-test C: force trigger captured OK", UVM_LOW)
+        endtask
+    endclass
+
+    // ------------------------------------------------------------------
+    // Test 5: SIG_DEF ROM readback
+    //   Verify CONFIG[19:16] = sig_count = 1 (default DUT params).
+    //   Read SIG_DEF entry[0] — expected 0x001F_00FF:
+    //     [31:28] fmt=0 (HEX), [27:24] rsvd=0,
+    //     [23:16] hi=31, [15:8] lo=0, [7:0] name_idx=0xFF
+    // ------------------------------------------------------------------
+    class ila_bscane2_sig_def_test extends ila_bscane2_base_test;
+        `uvm_component_utils(ila_bscane2_sig_def_test)
+        function new(string name, uvm_component parent);
+            super.new(name,parent); endfunction
+
+        virtual task body(uvm_phase phase);
+            ila_bscane2_seq seq = ila_bscane2_seq::type_id::create("seq");
+            bit [31:0] cfg;
+            bit [3:0]  sig_count;
+            bit [31:0] sig_def_word;
+
+            seq.start(env.agent.sequencer);
+            seq.wait_reset_done();
+            seq.reset_tap();
+            seq.load_user1();
+
+            // Verify CONFIG sig_count field (bits [19:16])
+            seq.ila_read_config(cfg);
+            sig_count = cfg[19:16];
+            `uvm_info("SIG_DEF",
+                $sformatf("CONFIG sig_count=%0d", sig_count), UVM_LOW)
+            if (sig_count !== 4'd1)
+                `uvm_error("SIG_COUNT",
+                    $sformatf("expected sig_count=1 got %0d", sig_count))
+
+            // Read entry[0]: fmt=0, hi=31, lo=0, name_idx=0xFF => 0x001F_00FF
+            seq.ila_read_sig_def(sig_def_word);
+            `uvm_info("SIG_DEF",
+                $sformatf("entry[0]=0x%08h", sig_def_word), UVM_LOW)
+            if (sig_def_word !== 32'h001F_00FF)
+                `uvm_error("SIG_DEF_VAL",
+                    $sformatf("expected 0x001F00FF got 0x%08h", sig_def_word))
         endtask
     endclass
 

@@ -1,0 +1,23 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "register_tools",
+    srcs = ["register_tools.cpp"],
+    hdrs = ["register_tools.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/boundary_scan:pin_driver",
+        "//src/boundary_scan:scanner",
+        "//src/capture:capture_engine",
+        "//src/capture:trigger",
+        "//src/config:pl_config",
+        "//src/hardware:capture_session",
+        "//src/hardware:hardware_context",
+        "//src/ila:ila_driver",
+        "//src/ila:ila_tap_backend",
+        "//src/mcp:executor_bridge",
+        "//src/mcp:tool_registry",
+        "//src/script:script_engine",
+        "@nlohmann_json//:json",
+    ],
+)

@@ -1,0 +1,79 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+# JSON-RPC 2.0 framing and message types.
+cc_library(
+    name = "json_rpc",
+    srcs = ["json_rpc.cpp"],
+    hdrs = ["json_rpc.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@nlohmann_json//:json",
+    ],
+)
+
+# Transport layer: StdioTransport and TcpTransport.
+cc_library(
+    name = "mcp_transport",
+    srcs = ["mcp_transport.cpp"],
+    hdrs = ["mcp_transport.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":json_rpc",
+        "@nlohmann_json//:json",
+    ],
+    linkopts = select({
+        "@platforms//os:windows": ["-DEFAULTLIB:ws2_32.lib"],
+        "//conditions:default": [],
+    }),
+)
+
+# Tool registration and JSON Schema subset validator.
+cc_library(
+    name = "tool_registry",
+    srcs = ["tool_registry.cpp"],
+    hdrs = ["tool_registry.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@nlohmann_json//:json",
+    ],
+)
+
+# MCP server: dispatches initialize / tools/list / tools/call.
+cc_library(
+    name = "mcp_server",
+    srcs = ["mcp_server.cpp"],
+    hdrs = ["mcp_server.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":json_rpc",
+        ":mcp_transport",
+        ":tool_registry",
+        "@nlohmann_json//:json",
+    ],
+)
+
+# Job tracking table (MCP-side strong references to HardwareJob).
+cc_library(
+    name = "job_table",
+    srcs = ["job_table.cpp"],
+    hdrs = ["job_table.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/hardware:hardware_job",
+    ],
+)
+
+# Bridge between MCP tool handlers and HardwareExecutor.
+cc_library(
+    name = "executor_bridge",
+    srcs = ["executor_bridge.cpp"],
+    hdrs = ["executor_bridge.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":job_table",
+        "//src/hardware:hardware_context",
+        "//src/hardware:hardware_executor",
+        "//src/hardware:hardware_job",
+        "@nlohmann_json//:json",
+    ],
+)

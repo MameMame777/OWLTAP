@@ -1,0 +1,52 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "hardware_job",
+    srcs = ["hardware_job.cpp"],
+    hdrs = ["hardware_job.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_library(
+    name = "hardware_context",
+    srcs = ["hardware_context.cpp"],
+    hdrs = ["hardware_context.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/boundary_scan:pin_driver",
+        "//src/boundary_scan:scanner",
+        "//src/config:pl_config",
+        "//src/ftdi:ftdi_device",
+        "//src/gui:app_config",
+        "//src/jtag:jtag_chain",
+        "//src/jtag:tap_controller",
+    ],
+)
+
+cc_library(
+    name = "hardware_executor",
+    srcs = ["hardware_executor.cpp"],
+    hdrs = ["hardware_executor.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":hardware_context",
+        ":hardware_job",
+        "//src/gui:app_config",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_library(
+    name = "capture_session",
+    srcs = ["capture_session.cpp"],
+    hdrs = ["capture_session.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/boundary_scan:scanner",
+        "//src/capture:capture_engine",
+        "//src/capture:trigger",
+    ],
+)

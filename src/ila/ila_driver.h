@@ -9,6 +9,21 @@
 
 namespace jtag::ila {
 
+/// One signal lane decoded from the SIG_DEF DR (IR 5'h03).
+///
+/// SIG_DEF word layout (must match hdl/ila/rtl/ila_tap.sv):
+///   [31:28] fmt[3:0]      (0=HEX 1=DEC 2=BIN)
+///   [27:24] reserved
+///   [23:16] hi[7:0]       (inclusive MSB, 0-based)
+///   [15: 8] lo[7:0]       (inclusive LSB, 0-based)
+///   [ 7: 0] name_idx[7:0] (0xFF = host auto-generates "data[hi:lo]")
+struct IlaSignalEntry {
+    uint8_t hi;
+    uint8_t lo;
+    uint8_t fmt;       ///< 0=HEX 1=DEC 2=BIN
+    uint8_t name_idx;  ///< 0xFF means auto-generate
+};
+
 /// Status bits reported by the ILA STATUS DR.
 struct IlaStatus {
     bool armed;
@@ -24,18 +39,19 @@ struct IlaStatus {
 /// CONFIG register bit layout (must match hdl/ila/rtl/ila_tap.sv):
 ///   [31:24] VERSION    (IP version)
 ///   [23:20] NUM_CH     (number of channels; 1 for current IP)
-///   [19:16] reserved
+///   [19:16] SIG_COUNT  (number of SIG_DEF entries; 0 = legacy, no SIG_DEF)
 ///   [15:10] DATA_W - 1 (6 bits; actual DATA_W = field + 1)
 ///   [ 9: 8] reserved
 ///   [ 7: 0] ADDR_W     (DEPTH = 1 << ADDR_W)
 struct IlaCaps {
-    uint8_t  version = 0;
-    uint8_t  num_ch  = 1;
-    uint8_t  data_w  = 32;
-    uint8_t  addr_w  = 10;
-    uint32_t depth   = 1024;
-    uint32_t raw     = 0;
-    bool     probed  = false;
+    uint8_t  version   = 0;
+    uint8_t  num_ch    = 1;
+    uint8_t  sig_count = 0;  ///< number of SIG_DEF entries (0 if legacy)
+    uint8_t  data_w    = 32;
+    uint8_t  addr_w    = 10;
+    uint32_t depth     = 1024;
+    uint32_t raw       = 0;
+    bool     probed    = false;
 };
 
 /// Host-side driver for the OwlTAP Internal Logic Analyzer IP.
@@ -59,6 +75,7 @@ public:
     enum Ir : uint32_t {
         kIrIdcode      = 0x01,
         kIrConfig      = 0x02,
+        kIrSigDef      = 0x03,
         kIrCtrl        = 0x08,
         kIrStatus      = 0x09,
         kIrTrigMask    = 0x0A,
@@ -86,6 +103,9 @@ public:
     int depth()     const { return static_cast<int>(caps_.depth); }
 
     bool readIdcode(uint32_t& idcode);
+    /// Read `caps().sig_count` signal-lane definitions from SIG_DEF (IR 5'h03).
+    /// Returns false (and sets lastError()) if sig_count is 0 or a JTAG error occurs.
+    bool readSignalDefs(std::vector<IlaSignalEntry>& out);
     bool configureTrigger(uint32_t mask, uint32_t value, uint16_t pre_samples);
     bool arm();
     bool stop();

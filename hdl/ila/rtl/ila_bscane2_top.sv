@@ -55,7 +55,14 @@ module ila_bscane2_top #(
     parameter int DEPTH     = 1024,
     parameter int ADDR_W    = 10,
     parameter int NUM_CH    = 1,
-    parameter logic [31:0] IDCODE_VAL = 32'hA17A_0001
+    parameter logic [31:0] IDCODE_VAL = 32'hA17A_0001,
+    // Signal definition ROM (Phase 2+).  Only indices [0:SIG_COUNT-1] are used.
+    // SIG_HI[i]/SIG_LO[i] are inclusive 0-based bit indices; SIG_FMT[i]: 0=HEX 1=DEC 2=BIN.
+    // SIG_COUNT must be in [1..15].
+    parameter int         SIG_COUNT            = 1,
+    parameter logic [7:0] SIG_HI  [0:14] = '{8'd31, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0},
+    parameter logic [7:0] SIG_LO  [0:14] = '{default: 8'd0},
+    parameter logic [3:0] SIG_FMT [0:14] = '{default: 4'd0}
 ) (
     // User capture interface
     input  wire              sample_clk,
@@ -119,6 +126,7 @@ module ila_bscane2_top #(
     localparam int FRAME_W = DATA_W + 5;  // 37
 
     logic [4:0]          stored_ir;
+    logic [3:0]          sig_def_idx;  // index into SIG_DEF ROM; auto-increments per scan
     logic [FRAME_W-1:0]  dr_shift;
 
     // ILA control registers (TCK domain)
@@ -135,27 +143,16 @@ module ila_bscane2_top #(
     // ------------------------------------------------------------------
     // CONFIG register value (read-only; see ila_tap.sv for bit layout)
     // ------------------------------------------------------------------
-    // Phase 1: fixed single-entry SIG_DEF ROM (Phase 2 will parameterize).
-    localparam logic [3:0]  SIG_COUNT_VAL = 4'd1;
-
     // SIG_DEF word format (read-only, 32 bits):
     //   [31:28] fmt[3:0]  (0=HEX 1=DEC 2=BIN; future: SIGNED/TIME)
     //   [27:24] reserved  = 4'h0
     //   [23:16] hi[7:0]   (inclusive MSB index, 0-based)
     //   [15: 8] lo[7:0]   (inclusive LSB index, 0-based)
     //   [ 7: 0] name_idx  (0xFF = host auto-generates "data[hi:lo]")
-    localparam logic [31:0] SIG_DEF_VAL = {
-        4'h0,                       // fmt = HEX
-        4'h0,                       // reserved
-        8'(DATA_W - 1),             // hi
-        8'd0,                       // lo
-        8'hFF                       // name_idx = none
-    };
-
     localparam logic [31:0] CONFIG_VAL = {
         8'h01,
         4'(NUM_CH),
-        SIG_COUNT_VAL,
+        4'(SIG_COUNT),
         6'(DATA_W - 1),
         2'h0,
         8'(ADDR_W)
@@ -169,7 +166,8 @@ module ila_bscane2_top #(
         case (stored_ir)
             5'h01:   capture_data = IDCODE_VAL;
             5'h02:   capture_data = CONFIG_VAL;
-            5'h03:   capture_data = SIG_DEF_VAL;
+            5'h03:   capture_data = {SIG_FMT[sig_def_idx], 4'h0,
+                                     SIG_HI[sig_def_idx], SIG_LO[sig_def_idx], 8'hFF};
             5'h09:   capture_data = {{(DATA_W-3){1'b0}},
                                       sts_full_tck, sts_triggered_tck,
                                       sts_armed_tck};
@@ -204,6 +202,7 @@ module ila_bscane2_top #(
     always_ff @(posedge bscan_tck or negedge tck_rst_n) begin
         if (!tck_rst_n) begin
             stored_ir           <= 5'h01;     // default: IDCODE
+            sig_def_idx         <= '0;
             trig_mask_tck       <= '0;
             trig_value_tck      <= '0;
             pre_samples_tck     <= kDefaultPre;
@@ -220,6 +219,13 @@ module ila_bscane2_top #(
             ctrl_force_trig_tck <= 1'b0;
 
             if (bscan_update) begin
+                // IR change: reset SIG_DEF index so next read starts at entry[0].
+                // Consecutive SIG_DEF scans (opcode unchanged) advance the index.
+                if (dr_shift[4:0] != stored_ir)
+                    sig_def_idx <= '0;
+                else if (dr_shift[4:0] == 5'h03)
+                    sig_def_idx <= (sig_def_idx < 4'(SIG_COUNT - 1))
+                                   ? sig_def_idx + 4'd1 : '0;
                 stored_ir <= dr_shift[4:0];
 
                 case (dr_shift[4:0])

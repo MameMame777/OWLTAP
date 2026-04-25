@@ -59,11 +59,12 @@ bool IlaDriver::probe(IlaCaps& out) {
     if (!shiftDrInt(32, 0, raw)) return false;
 
     IlaCaps c{};
-    c.raw     = raw;
-    c.version = static_cast<uint8_t>((raw >> 24) & 0xFF);
-    c.num_ch  = static_cast<uint8_t>((raw >> 20) & 0x0F);
-    c.data_w  = static_cast<uint8_t>(((raw >> 10) & 0x3F) + 1);
-    c.addr_w  = static_cast<uint8_t>(raw & 0xFF);
+    c.raw       = raw;
+    c.version   = static_cast<uint8_t>((raw >> 24) & 0xFF);
+    c.num_ch    = static_cast<uint8_t>((raw >> 20) & 0x0F);
+    c.sig_count = static_cast<uint8_t>((raw >> 16) & 0x0F);
+    c.data_w    = static_cast<uint8_t>(((raw >> 10) & 0x3F) + 1);
+    c.addr_w    = static_cast<uint8_t>(raw & 0xFF);
     c.depth   = (c.addr_w == 0 || c.addr_w > 20)
                     ? static_cast<uint32_t>(kDepth)
                     : (1u << c.addr_w);
@@ -86,6 +87,30 @@ bool IlaDriver::probe(IlaCaps& out) {
 bool IlaDriver::readIdcode(uint32_t& idcode) {
     if (!backend_.selectIr(kIrIdcode)) { last_error_ = backend_.lastError(); return false; }
     return shiftDrInt(32, 0, idcode);
+}
+
+bool IlaDriver::readSignalDefs(std::vector<IlaSignalEntry>& out) {
+    if (caps_.sig_count == 0) {
+        last_error_ = "sig_count is 0; no SIG_DEF entries available";
+        return false;
+    }
+    if (!backend_.selectIr(kIrSigDef)) {
+        last_error_ = backend_.lastError();
+        return false;
+    }
+    out.clear();
+    out.reserve(caps_.sig_count);
+    for (uint8_t i = 0; i < caps_.sig_count; ++i) {
+        uint32_t word = 0;
+        if (!shiftDrInt(32, 0, word)) return false;
+        IlaSignalEntry e;
+        e.fmt      = static_cast<uint8_t>((word >> 28) & 0x0F);
+        e.hi       = static_cast<uint8_t>((word >> 16) & 0xFF);
+        e.lo       = static_cast<uint8_t>((word >>  8) & 0xFF);
+        e.name_idx = static_cast<uint8_t>( word        & 0xFF);
+        out.push_back(e);
+    }
+    return true;
 }
 
 bool IlaDriver::configureTrigger(uint32_t mask, uint32_t value,

@@ -48,12 +48,19 @@ module ila_bringup_top (
     // Trigger example: mask=0xFFFFFFFF, value=0x00001000
     //   => fires when counter == 0x1000 (approx 8.192 us after reset)
     // ------------------------------------------------------------------
+    // Phase 2 SIG_DEF ROM: split the 32-bit counter into two 16-bit lanes
+    //   entry[0]: data[31:16]  (upper half)
+    //   entry[1]: data[15:0]   (lower half)
     ila_bscane2_top #(
         .DATA_W    (32),
         .DEPTH     (1024),
         .ADDR_W    (10),
         .NUM_CH    (1),
-        .IDCODE_VAL(32'hA17A_0001)
+        .IDCODE_VAL(32'hA17A_0001),
+        .SIG_COUNT (2),
+        .SIG_HI    ('{8'd31, 8'd15, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0}),
+        .SIG_LO    ('{8'd16, 8'd0,  8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0}),
+        .SIG_FMT   ('{default: 4'd0})
     ) u_ila (
         .sample_clk   (sysclk),
         .sample_rst_n (rst_n),

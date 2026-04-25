@@ -30,7 +30,11 @@ module ila_top #(
     parameter int DEPTH       = 1024,
     parameter int ADDR_W      = 10,
     parameter int NUM_CH      = 1,
-    parameter logic [31:0] IDCODE_VAL = 32'hA17A_0001
+    parameter logic [31:0] IDCODE_VAL = 32'hA17A_0001,
+    parameter int         SIG_COUNT            = 1,
+    parameter logic [7:0] SIG_HI  [0:14] = '{8'd31, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0},
+    parameter logic [7:0] SIG_LO  [0:14] = '{default: 8'd0},
+    parameter logic [3:0] SIG_FMT [0:14] = '{default: 4'd0}
 ) (
     // JTAG
     input  wire                 tck,
@@ -66,7 +70,11 @@ module ila_top #(
     ila_tap #(
         .DATA_W(DATA_W), .DEPTH(DEPTH), .ADDR_W(ADDR_W),
         .NUM_CH(NUM_CH),
-        .IDCODE_VAL(IDCODE_VAL)
+        .IDCODE_VAL(IDCODE_VAL),
+        .SIG_COUNT(SIG_COUNT),
+        .SIG_HI(SIG_HI),
+        .SIG_LO(SIG_LO),
+        .SIG_FMT(SIG_FMT)
     ) u_tap (
         .tck             (tck),
         .trst_n          (trst_n),

@@ -598,8 +598,10 @@ void AppWindow::onConnect() {
         } else {
             ila_panel_.setChain(chain_.get(), 0);
         }
-        // Apply persisted signal-lane definitions (overrides probe() defaults)
-        ila_panel_.importSignalConfigs(config_.ila_signals);
+        // Apply persisted signal-lane definitions only when RTL did not
+        // provide them (e.g. older bitstream without SIG_DEF support).
+        if (!ila_panel_.hasSigDefsFromRtl())
+            ila_panel_.importSignalConfigs(config_.ila_signals);
     }
 
     // Build device info string

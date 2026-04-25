@@ -122,7 +122,28 @@ void IlaPanel::setChain(jtag::JtagChain* chain, int device_index) {
         (void)driver_->probe(caps);  // best-effort; falls back to defaults
         if (pre_samples_ >= driver_->depth())
             pre_samples_ = driver_->depth() / 4;
-        resetSignalDefs();
+        // Populate signal lanes from RTL SIG_DEF register when available.
+        bool loaded = false;
+        if (caps.sig_count > 0) {
+            std::vector<jtag::ila::IlaSignalEntry> entries;
+            if (driver_->readSignalDefs(entries)) {
+                signals_.clear();
+                for (const auto& e : entries) {
+                    IlaSignalDef d{};
+                    if (e.name_idx == 0xFF)
+                        std::snprintf(d.name, sizeof(d.name), "data[%d:%d]", e.hi, e.lo);
+                    else
+                        std::snprintf(d.name, sizeof(d.name), "sig%u", e.name_idx);
+                    d.hi  = static_cast<int>(e.hi);
+                    d.lo  = static_cast<int>(e.lo);
+                    d.fmt = static_cast<BusFormat>(e.fmt < 3 ? e.fmt : 0);
+                    signals_.push_back(d);
+                }
+                loaded = true;
+            }
+        }
+        rtl_sig_defs_loaded_ = loaded;
+        if (!loaded) resetSignalDefs();
     }
 }
 
@@ -141,7 +162,28 @@ void IlaPanel::setBscaneChain(jtag::JtagChain* chain, int pl_tap_index) {
         (void)driver_->probe(caps);  // best-effort; falls back to defaults
         if (pre_samples_ >= driver_->depth())
             pre_samples_ = driver_->depth() / 4;
-        resetSignalDefs();
+        // Populate signal lanes from RTL SIG_DEF register when available.
+        bool loaded = false;
+        if (caps.sig_count > 0) {
+            std::vector<jtag::ila::IlaSignalEntry> entries;
+            if (driver_->readSignalDefs(entries)) {
+                signals_.clear();
+                for (const auto& e : entries) {
+                    IlaSignalDef d{};
+                    if (e.name_idx == 0xFF)
+                        std::snprintf(d.name, sizeof(d.name), "data[%d:%d]", e.hi, e.lo);
+                    else
+                        std::snprintf(d.name, sizeof(d.name), "sig%u", e.name_idx);
+                    d.hi  = static_cast<int>(e.hi);
+                    d.lo  = static_cast<int>(e.lo);
+                    d.fmt = static_cast<BusFormat>(e.fmt < 3 ? e.fmt : 0);
+                    signals_.push_back(d);
+                }
+                loaded = true;
+            }
+        }
+        rtl_sig_defs_loaded_ = loaded;
+        if (!loaded) resetSignalDefs();
     }
 }
 
@@ -250,8 +292,8 @@ void IlaPanel::draw() {
     // ── CAPS line (shown when probed) ────────────────────────────────
     if (hw_ok && driver_->probed()) {
         const auto& c = driver_->caps();
-        ImGui::TextDisabled("CAPS: DW=%d  Depth=%d  NUM_CH=%d  ver=0x%02X",
-                            c.data_w, c.depth, c.num_ch, c.version);
+        ImGui::TextDisabled("CAPS: DW=%d  Depth=%d  NUM_CH=%d  SIG_COUNT=%d  ver=0x%02X",
+                            c.data_w, c.depth, c.num_ch, c.sig_count, c.version);
     } else if (hw_ok) {
         ImGui::TextDisabled("CAPS: (not probed) -- %s",
                             driver_->lastError().c_str());

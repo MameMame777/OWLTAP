@@ -55,7 +55,14 @@ private:
     JtagChain&  chain_;
     int         pl_tap_index_;
     uint32_t    pending_ir_       = 0x01u;  // opcode to embed in next frame
-    uint32_t    stored_ir_in_hw_  = 0x01u;  // HDL stored_ir after last UPDATE
+    // Initialize to 0xFF (impossible opcode) so the very first selectIr/shiftDr
+    // always triggers a prime scan regardless of the opcode.  This means the
+    // BSCANE2 first-scan-always-0 quirk is absorbed by that prime scan, and the
+    // subsequent real scan reliably captures register data.
+    // (Previously 0x01 matched the post-reset stored_ir, skipping the prime scan
+    // for IDCODE reads and leaving only 2 warm-up DR scans before CONFIG; on some
+    // boards after PL programming that was insufficient.)
+    uint32_t    stored_ir_in_hw_  = 0xFFu;  // HDL stored_ir after last UPDATE
     std::string last_error_;
 
     // Perform one 37-bit frame DR shift with the current pending_ir_ and the

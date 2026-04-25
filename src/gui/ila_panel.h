@@ -85,6 +85,10 @@ public:
     /// If `cfgs` is empty, the current definitions are kept untouched.
     void importSignalConfigs(const std::vector<IlaSignalConfig>& cfgs);
 
+    /// Returns true when signal definitions were successfully read from the
+    /// RTL SIG_DEF register during the last setBscaneChain()/setChain() call.
+    bool hasSigDefsFromRtl() const { return rtl_sig_defs_loaded_; }
+
 private:
     void doArm();
     void doStop();
@@ -122,6 +126,7 @@ private:
 
     // Signal lane definitions (auto-populated from probe(); user-editable)
     std::vector<IlaSignalDef> signals_;
+    bool                      rtl_sig_defs_loaded_ = false; // true when SIG_DEF read from RTL
 
     // Poll timer
     double last_poll_time_ = 0.0;

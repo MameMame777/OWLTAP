@@ -21,7 +21,14 @@ module ila_tap #(
     parameter int DEPTH       = 1024,
     parameter int ADDR_W      = 10,
     parameter int NUM_CH      = 1,   // number of channels (reserved, always 1 for now)
-    parameter logic [31:0] IDCODE_VAL = 32'hA17A_0001
+    parameter logic [31:0] IDCODE_VAL = 32'hA17A_0001,
+    // Signal definition ROM (Phase 2+).  Only indices [0:SIG_COUNT-1] are used.
+    // SIG_HI[i]/SIG_LO[i] are inclusive 0-based bit indices; SIG_FMT[i]: 0=HEX 1=DEC 2=BIN.
+    // SIG_COUNT must be in [1..15].
+    parameter int         SIG_COUNT            = 1,
+    parameter logic [7:0] SIG_HI  [0:14] = '{8'd31, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0},
+    parameter logic [7:0] SIG_LO  [0:14] = '{default: 8'd0},
+    parameter logic [3:0] SIG_FMT [0:14] = '{default: 4'd0}
 ) (
     // JTAG port
     input  wire                 tck,
@@ -136,6 +143,17 @@ module ila_tap #(
         end
     end
 
+    // SIG_DEF ROM index: resets to 0 on trst_n or any IR change (UPDATE_IR)
+    // so the first DR scan always reads entry[0].  Increments on each
+    // SIG_DEF UPDATE_DR so consecutive reads step through entries in order.
+    logic [3:0] sig_def_idx;
+    always_ff @(posedge tck or negedge trst_n) begin
+        if (!trst_n)                                          sig_def_idx <= '0;
+        else if (state == UPDATE_IR)                          sig_def_idx <= '0;
+        else if (state == UPDATE_DR && ir_latched == IR_SIG_DEF)
+            sig_def_idx <= (sig_def_idx < 4'(SIG_COUNT - 1)) ? sig_def_idx + 4'd1 : '0;
+    end
+
     // ------------------------------------------------------------------
     // CONFIG register (read-only)
     //   [31:24] VERSION    = 8'h01
@@ -145,27 +163,16 @@ module ila_tap #(
     //   [ 9: 8] RESERVED   = 2'h0
     //   [ 7: 0] ADDR_W     (DEPTH = 1 << ADDR_W)
     // ------------------------------------------------------------------
-    // Phase 1: fixed single-entry SIG_DEF ROM (Phase 2 will parameterize).
-    localparam logic [3:0]  SIG_COUNT_VAL = 4'd1;
-
     // SIG_DEF word format (read-only, 32 bits):
     //   [31:28] fmt[3:0]  (0=HEX 1=DEC 2=BIN; future: SIGNED/TIME)
     //   [27:24] reserved  = 4'h0
     //   [23:16] hi[7:0]   (inclusive MSB index, 0-based)
     //   [15: 8] lo[7:0]   (inclusive LSB index, 0-based)
     //   [ 7: 0] name_idx  (0xFF = host auto-generates "data[hi:lo]")
-    localparam logic [31:0] SIG_DEF_VAL = {
-        4'h0,                       // fmt = HEX
-        4'h0,                       // reserved
-        8'(DATA_W - 1),             // hi
-        8'd0,                       // lo
-        8'hFF                       // name_idx = none
-    };
-
     localparam logic [31:0] CONFIG_VAL = {
         8'h01,
         4'(NUM_CH),
-        SIG_COUNT_VAL,
+        4'(SIG_COUNT),
         6'(DATA_W - 1),
         2'h0,
         8'(ADDR_W)
@@ -204,7 +211,7 @@ module ila_tap #(
             bypass_shift      <= 1'b0;
             idcode_shift      <= IDCODE_VAL;
             config_shift      <= CONFIG_VAL;
-            sigdef_shift      <= SIG_DEF_VAL;
+            sigdef_shift      <= '0;
             ctrl_shift        <= '0;
             status_shift      <= '0;
             mask_shift        <= '0;
@@ -231,7 +238,8 @@ module ila_tap #(
                 unique case (ir_latched)
                     IR_IDCODE:      idcode_shift <= IDCODE_VAL;
                     IR_CONFIG:      config_shift <= CONFIG_VAL;
-                    IR_SIG_DEF:     sigdef_shift <= SIG_DEF_VAL;
+                    IR_SIG_DEF:     sigdef_shift <= {SIG_FMT[sig_def_idx], 4'h0,
+                                                     SIG_HI[sig_def_idx], SIG_LO[sig_def_idx], 8'hFF};
                     IR_STATUS:      status_shift <= {5'b0, sts_full,
                                                      sts_triggered, sts_armed};
                     IR_TRIG_MASK:   mask_shift   <= mask_reg;

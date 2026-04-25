@@ -146,3 +146,45 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "hardware_job_test",
+    srcs = ["hardware_job_test.cpp"],
+    deps = [
+        "//src/hardware:hardware_job",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "json_rpc_test",
+    srcs = ["json_rpc_test.cpp"],
+    deps = [
+        "//src/mcp:json_rpc",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "tool_registry_test",
+    srcs = ["tool_registry_test.cpp"],
+    deps = [
+        "//src/mcp:tool_registry",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "capture_session_test",
+    srcs = ["capture_session_test.cpp"],
+    deps = [
+        "//src/boundary_scan:scanner",
+        "//src/capture:capture_engine",
+        "//src/capture:trigger",
+        "//src/ftdi:ftdi_device",
+        "//src/hardware:capture_session",
+        "//src/jtag:jtag_chain",
+        "//src/jtag:tap_controller",
+        "@googletest//:gtest_main",
+    ],
+)
+

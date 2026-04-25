@@ -60,8 +60,8 @@ private:
 
     mutable std::mutex      mu_;
     JobState                state_{JobState::kQueued};
-    nlohmann::json          progress_{nullptr};
-    nlohmann::json          result_{nullptr};
+    nlohmann::json          progress_;   // null until set
+    nlohmann::json          result_;     // null until set
     std::string             error_;
     std::atomic<bool>       cancel_requested_{false};
 };

@@ -2278,6 +2278,9 @@ void AppWindow::onMcpStartStdio() {
     if (mcp_mode_ != McpMode::kOff) return;
     if (!connected_) return;
 
+    // Release the GUI's FTDI handle before the MCP executor opens its own.
+    onDisconnect();
+
     mcp_executor_ = std::make_unique<hardware::HardwareExecutor>(config_);
     std::string err = mcp_executor_->start();
     if (!err.empty()) {
@@ -2301,6 +2304,9 @@ void AppWindow::onMcpStartStdio() {
 void AppWindow::onMcpStartTcp(uint16_t port) {
     if (mcp_mode_ != McpMode::kOff) return;
     if (!connected_) return;
+
+    // Release the GUI's FTDI handle before the MCP executor opens its own.
+    onDisconnect();
 
     mcp_executor_ = std::make_unique<hardware::HardwareExecutor>(config_);
     std::string err = mcp_executor_->start();

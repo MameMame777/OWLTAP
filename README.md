@@ -10,6 +10,9 @@
 </p>
 
 ---
+O:OpenSource
+W:Waveform
+L:Logger
 
 OWLTAP is a desktop application for interfacing with the JTAG TAP of an FPGA or SoC device, providing boundary-scan control, signal capture, and waveform visualization.
 

@@ -86,7 +86,8 @@ private:
     // Daemon process controller actions
     void onDaemonStart();
     void onDaemonStop();
-    void onDaemonConnect();   // Phase 3: connect GUI client to daemon GUI RPC port
+    void onDaemonConnect();        // Phase 3: connect GUI client to daemon GUI RPC port
+    void onDaemonDetectDevices();  // Trigger hardware/detect_devices through daemon RPC
     void drainDaemonLog();
 
     // PL programming (background thread)

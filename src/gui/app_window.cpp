@@ -1997,6 +1997,12 @@ void AppWindow::buildMenuBar() {
                 if (ImGui::MenuItem("Connect (via Daemon)", nullptr, false, can_connect_rpc)) {
                     onDaemonConnect();
                 }
+                const bool can_detect =
+                    gui_client_->isConnected() &&
+                    !daemon_connect_running_.load(std::memory_order_relaxed);
+                if (ImGui::MenuItem("Detect Devices (via Daemon)", nullptr, false, can_detect)) {
+                    onDaemonDetectDevices();
+                }
                 ImGui::Separator();
                 // -- Existing in-process MCP section --
                 const bool running = (mcp_mode_ != McpMode::kOff);
@@ -2499,6 +2505,52 @@ void AppWindow::onDaemonConnect() {
 
         std::lock_guard<std::mutex> lk(daemon_connect_mutex_);
         daemon_connect_result_ = std::move(report);
+        daemon_connect_running_.store(false, std::memory_order_release);
+    });
+}
+
+void AppWindow::onDaemonDetectDevices() {
+    if (!gui_client_->isConnected()) {
+        DebugLogPanel::append("[daemon] Not connected to GUI RPC");
+        return;
+    }
+    if (daemon_connect_running_.load(std::memory_order_acquire)) {
+        DebugLogPanel::append("[daemon] Operation already in progress");
+        return;
+    }
+    daemon_connect_running_.store(true, std::memory_order_release);
+    setStatusMessage("Detecting devices via daemon...");
+
+    if (daemon_connect_thread_.joinable()) daemon_connect_thread_.join();
+
+    daemon_connect_thread_ = std::thread([this]() {
+        std::string report;
+        try {
+            auto devs = gui_client_->detectDevices();
+            const int count = devs.value("device_count", 0);
+            report += "[daemon] detect_devices: " + std::to_string(count) +
+                      " device(s)\n";
+            if (devs.contains("devices") && devs["devices"].is_array()) {
+                for (const auto& d : devs["devices"]) {
+                    char buf[128];
+                    std::snprintf(buf, sizeof(buf),
+                                  "[daemon]   [%d] IDCODE=%s ir_len=%d bsdl=%s",
+                                  d.value("position", -1),
+                                  d.value("idcode", "?").c_str(),
+                                  d.value("ir_length", 0),
+                                  d.value("bsdl_loaded", false) ? "loaded" : "none");
+                    report += std::string(buf) + "\n";
+                }
+            }
+            // Force immediate re-poll so status bar updates without waiting 2 s.
+            last_daemon_status_poll_ = {};
+        } catch (const std::exception& e) {
+            report = std::string("[daemon] detect_devices error: ") + e.what();
+        }
+        {
+            std::lock_guard<std::mutex> lk(daemon_connect_mutex_);
+            daemon_connect_result_ = std::move(report);
+        }
         daemon_connect_running_.store(false, std::memory_order_release);
     });
 }

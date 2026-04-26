@@ -15,6 +15,7 @@ cc_library(
         "//src/hardware:hardware_context",
         "//src/ila:ila_driver",
         "//src/ila:ila_tap_backend",
+        "//src/ila:bscane_ila_tap_backend",
         "//src/mcp:executor_bridge",
         "//src/mcp:tool_registry",
         "//src/script:script_engine",

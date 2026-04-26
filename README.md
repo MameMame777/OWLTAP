@@ -220,21 +220,104 @@ docs/              -- architecture references, implementation plans
 
 ## Testing
 
-Unit tests cover all hardware-independent logic:
+### Unit tests (no hardware required)
 
-```
-//test:bsdl_parser_test    -- BSDL lexer + parser
-//test:mpsse_test          -- MPSSE command encoding
-//test:tap_controller_test -- TAP state machine
-//test:trigger_test        -- Trigger engine
-//test:scanner_test        -- Boundary-scan decoder
-//test:pin_driver_test     -- BSR staging free functions
-//test:script_engine_test  -- Script parser + executor
-//test:spi_flash_test      -- MT25Q SPI flash command encoding
+```powershell
+bazelisk test //test/...
 ```
 
-Hardware-dependent paths (`FtdiDevice`, `JtagChain::readBSR/writeBSR`) require a
-physical FTDI adapter and are exercised manually or via `jtag_diag`.
+| Target | What it covers |
+|--------|----------------|
+| `//test:bsdl_parser_test` | BSDL lexer + parser |
+| `//test:mpsse_test` | MPSSE command encoding |
+| `//test:tap_controller_test` | TAP state machine |
+| `//test:trigger_test` | Trigger engine |
+| `//test:scanner_test` | Boundary-scan decoder |
+| `//test:pin_driver_test` | BSR staging free functions |
+| `//test:script_engine_test` | Script parser + executor |
+| `//test:spi_flash_test` | MT25Q SPI flash command encoding |
+| `//test:capture_session_test` | Capture session ring buffer |
+| `//test:json_rpc_test` | JSON-RPC framing helpers |
+| `//test:tool_registry_test` | MCP tool registry |
+
+### Hardware-in-the-loop tests (FTDI adapter + target required)
+
+The following Python scripts exercise the full stack against real hardware.
+All scripts require Python 3.10+ (no extra dependencies).
+
+#### `test_mcp_full.py` — comprehensive MCP integration test *(recommended)*
+
+Starts `jtag_daemon.exe` automatically, runs every major MCP tool in sequence,
+and shuts down the daemon cleanly.
+
+```powershell
+python test_mcp_full.py [bsdl_path] [daemon_exe]
+
+# Example (defaults work if run from the repo root after a build):
+python test_mcp_full.py xa7z020_clg484.bsd bazel-bin\src\tools\jtag_daemon.exe
+```
+
+| Test | MCP tool | What is verified |
+|------|----------|-----------------|
+| tools/list | `tools/list` | All 15 expected tool names are registered |
+| detect_devices | `detect_devices` | Device count ≥ 1; IDCODE / IR-length fields present |
+| load_bsdl | `load_bsdl` | Entity name returned; boundary length populated |
+| list_pins | `list_pins` | ≥ 1 observable pin in the BSDL |
+| read_pin | `read_pin` | Single pin returns `high` / `low` / `unknown` |
+| run_script | `run_script` | `sample` + `read <pin>` script completes with `success=true` |
+| capture (single) | `capture_start` + `get_samples` | Job reaches `complete`; ≥ 1 sample with pin data |
+| capture (stop) | `capture_start` + `capture_stop` + `get_samples` | Free-run job stops and reaches terminal state |
+| program_bitstream | `program_bitstream` + `job_poll` | Async JTAG bitstream write completes with `ok=true` |
+| read_ila_status | `read_ila_status` (BSCANE2) | ILA version / depth / width / armed / triggered / full returned after PL config |
+
+**Hardware test result (2026-04-27, xa7z020_clg484 / ila_bringup_top.bit):**
+
+```
+Result: 10/10 tests passed
+
+[TEST] detect_devices        → 2 device(s): pos=0 IDCODE=0x23727093 IR=6, pos=1 IDCODE=0x4BA00477 IR=4
+[TEST] load_bsdl             → entity='XA7Z020_CLG484'
+[TEST] list_pins             → 333 observable, 327 drivable
+[TEST] read_pin              → RSVDVCC3_T10 = high
+[TEST] run_script            → success=True
+[TEST] capture (single)      → 1 samples, 333 pins per sample
+[TEST] capture (stop)        → state=cancelled
+[TEST] program_bitstream     → state=complete  ok=True
+[TEST] read_ila_status       → version=3  depth=1024  data_width=32  sig_count=2  armed=False
+```
+
+#### `test_mcp_live.py` — basic MCP smoke test
+
+Requires a daemon already running on port 9999.
+
+```powershell
+# Start daemon first:
+.\bazel-bin\src\tools\jtag_daemon.exe --mcp-port 9999
+
+# Run in another terminal:
+python test_mcp_live.py
+```
+
+Tests: `detect_devices`, `load_bsdl`, `list_pins`.
+
+#### GUI RPC tests
+
+These tests talk to the daemon's internal GUI RPC endpoint (plain JSON-RPC 2.0,
+no MCP handshake).  The port is printed by the daemon on startup.
+
+| Script | Tests |
+|--------|-------|
+| `test_gui_rpc_bsdl.py <port> [bsdl]` | `hardware/detect_devices`, `hardware/load_bsdl`, `hardware/list_pins` |
+| `test_gui_rpc_capture.py <port> [bsdl]` | Full capture flow: detect → load → `capture/start` → `capture/get_samples` poll |
+
+```powershell
+# Start daemon (GUI port is printed to stderr):
+.\bazel-bin\src\tools\jtag_daemon.exe
+# [jtag_daemon] GUI RPC listening on 127.0.0.1:54321
+
+python test_gui_rpc_bsdl.py 54321
+python test_gui_rpc_capture.py 54321
+```
 
 ## License
 

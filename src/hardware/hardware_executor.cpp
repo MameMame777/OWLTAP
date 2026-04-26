@@ -140,11 +140,31 @@ void HardwareExecutor::workerLoop() {
 
         {
             std::unique_lock<std::mutex> lk(queue_mu_);
-            queue_cv_.wait(lk, [this] {
-                return !queue_.empty() || stop_flag_.load();
-            });
+            const auto timeout = idle_close_timeout_;
+            if (timeout.count() > 0) {
+                // Timed wait: if we time out with an empty queue and the
+                // hardware is open, release the D2XX handle so other
+                // processes can acquire it.
+                queue_cv_.wait_for(lk, timeout, [this] {
+                    return !queue_.empty() || stop_flag_.load();
+                });
+            } else {
+                queue_cv_.wait(lk, [this] {
+                    return !queue_.empty() || stop_flag_.load();
+                });
+            }
 
             if (stop_flag_.load() && queue_.empty()) break;
+
+            if (queue_.empty()) {
+                // Idle timeout fired with no pending jobs — close hardware.
+                if (context_->isOpen()) {
+                    context_->close();
+                    std::fprintf(stderr,
+                        "[jtag_daemon] Idle timeout: hardware released.\n");
+                }
+                continue;
+            }
 
             entry = std::move(queue_.front());
             queue_.pop_front();

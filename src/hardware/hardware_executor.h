@@ -93,6 +93,18 @@ private:
                        std::weak_ptr<HardwareJob>>   job_registry_;
 
     std::thread worker_;
+
+    // After this many milliseconds of no queued jobs the worker closes the
+    // hardware device so other processes (e.g. a fresh jtag_viewer invocation)
+    // can acquire the D2XX handle.  0 = never auto-close (default off).
+    std::chrono::milliseconds idle_close_timeout_{0};
+
+public:
+    // Set the idle-close timeout.  Call before startWorker() / start().
+    // A value of 0 disables auto-close (hardware stays open until shutdown).
+    void setIdleCloseTimeout(std::chrono::milliseconds ms) {
+        idle_close_timeout_ = ms;
+    }
 };
 
 }  // namespace jtag::hardware

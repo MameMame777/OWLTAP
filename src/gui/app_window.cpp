@@ -39,8 +39,6 @@
 #include "src/boundary_scan/interconnect_test.h"
 #include "src/config/pl_config.h"
 #include "src/flash/flash_programmer.h"
-#include "src/mcp/mcp_transport.h"
-#include "src/mcp/tools/register_tools.h"
 #include "src/script/script_engine.h"
 #include "src/script/test_suite.h"
 #include "src/xdc/xdc_parser.h"
@@ -190,6 +188,39 @@ private:
     bool& extest_outputs_active_;
 };
 
+// Convert a JSON samples array (from daemon captureGetSamples) to SampleFrame
+// vector.  The JSON format matches samplesToJson() in register_tools.cpp:
+//   [{ "timestamp_us": <int64>, "trigger_point": bool,
+//      "pins": { "PIN_NAME": "high"|"low"|"unknown" } }]
+static std::vector<jtag::SampleFrame> samplesFromJson(
+    const nlohmann::json& arr) {
+    std::vector<jtag::SampleFrame> frames;
+    if (!arr.is_array()) return frames;
+    frames.reserve(arr.size());
+    for (const auto& s : arr) {
+        jtag::SampleFrame f;
+        if (s.contains("timestamp_us") && s["timestamp_us"].is_number_integer()) {
+            f.timestamp = std::chrono::steady_clock::time_point{
+                std::chrono::microseconds{
+                    s["timestamp_us"].get<long long>()}};
+        }
+        f.trigger_point = s.value("trigger_point", false);
+        if (s.contains("pins") && s["pins"].is_object()) {
+            for (auto it = s["pins"].begin(); it != s["pins"].end(); ++it) {
+                jtag::PinState state = jtag::PinState::UNKNOWN;
+                if (it.value().is_string()) {
+                    const std::string& v = it.value().get<std::string>();
+                    if (v == "high")      state = jtag::PinState::HIGH;
+                    else if (v == "low")  state = jtag::PinState::LOW;
+                }
+                f.data.pin_states[it.key()] = state;
+            }
+        }
+        frames.push_back(std::move(f));
+    }
+    return frames;
+}
+
 static void syncSelectionViews(const std::vector<jtag::SampleFrame>& samples) {
     const auto selected = SignalPanel::selectedSignals();
     const auto& buses   = SignalPanel::buses();
@@ -334,9 +365,6 @@ AppWindow::~AppWindow() {
     config_.ila_or_mode   = ila_panel_.orMode();
     config_.save("cfg.json");
 
-    // Stop MCP server before disconnecting hardware.
-    onMcpStop();
-
     onDisconnect();
 
     // Disconnect GUI RPC client and join background threads.
@@ -371,7 +399,12 @@ void AppWindow::run() {
             SignalPanel::consumeBusChanged()) {
             syncSelectionViews(cached_samples_);
         }
-        const bool can_capture = (capture_engine_ != nullptr && !capturing_);
+        // Daemon mode: capture_engine_ is always null, so also enable when
+        // the GUI RPC is connected and a BSDL has been loaded.
+        const bool daemon_can_capture =
+            gui_client_ && gui_client_->isConnected() && bsdl_device_index_ >= 0;
+        const bool can_capture =
+            (capture_engine_ != nullptr || daemon_can_capture) && !capturing_;
         const auto waveform_actions =
             WaveformView::draw(can_capture, capturing_);
         if (waveform_actions.run_requested) {
@@ -508,25 +541,6 @@ void AppWindow::buildStatusBar() {
         ImGui::SameLine();
         ImGui::Text("%zu", cached_samples_.size());
 
-        // ── MCP server status ─────────────────────────────
-        ImGui::SameLine();
-        ImGui::TextColored(theme::kMuted, "|");
-        ImGui::SameLine();
-        switch (mcp_mode_) {
-            case McpMode::kOff:
-                ImGui::TextColored(theme::kMuted, "MCP: off");
-                break;
-            case McpMode::kStdio:
-                ImGui::TextColored(theme::kSuccess, "MCP: stdio");
-                break;
-            case McpMode::kTcp: {
-                char tcp_buf[32];
-                std::snprintf(tcp_buf, sizeof(tcp_buf), "MCP: tcp:%u", mcp_tcp_port_);
-                ImGui::TextColored(theme::kSuccess, "%s", tcp_buf);
-                break;
-            }
-        }
-
         // ── Right-aligned: status message + FPS ──────────
         const ImGuiIO& io = ImGui::GetIO();
         char fps_buf[32];
@@ -561,77 +575,32 @@ void AppWindow::onConnect() {
 
     const auto& cfg = DeviceDialog::config();
 
-    // Persist device settings to config
-    config_.vendor_id        = cfg.vendor_id;
-    config_.product_id       = cfg.product_id;
-    config_.serial           = cfg.serial;
+    // Persist device settings so jtag_daemon reads the same config.
+    config_.vendor_id         = cfg.vendor_id;
+    config_.product_id        = cfg.product_id;
+    config_.serial            = cfg.serial;
     config_.interface_channel = cfg.interface_channel;
-    config_.clock_freq_hz    = cfg.clock_freq_hz;
+    config_.clock_freq_hz     = cfg.clock_freq_hz;
+    config_.save("cfg.json");
 
-    ftdi_ = std::make_unique<jtag::FtdiDevice>();
-    if (!ftdi_->open(cfg.vendor_id, cfg.product_id, cfg.serial,
-                     static_cast<jtag::FtdiInterface>(cfg.interface_channel))) {
-        setStatusMessage("Connect failed: " + ftdi_->lastError());
-        ftdi_.reset();
-        return;
+    // Phase 5: always use the daemon path.
+    // Start daemon if it is not already running.
+    const DaemonStatus ds = daemon_ctrl_->status();
+    if (ds.state == DaemonState::kOff || ds.state == DaemonState::kError) {
+        onDaemonStart();
     }
 
-    if (!ftdi_->initMpsse(cfg.clock_freq_hz)) {
-        setStatusMessage("MPSSE init failed: " + ftdi_->lastError());
-        ftdi_.reset();
-        return;
+    // If daemon is already up with a gui_port, connect immediately.
+    const DaemonStatus ds2 = daemon_ctrl_->status();
+    if (ds2.state == DaemonState::kRunning && ds2.gui_port != 0) {
+        onDaemonConnect();
+        // onDaemonConnect() is async; connected_ will be set once it completes
+        // (see drainDaemonLog).
+    } else {
+        // Daemon is still starting; auto-connect once it reports gui_port.
+        pending_daemon_connect_ = true;
+        setStatusMessage("Daemon starting... will connect automatically.");
     }
-
-    tap_ = std::make_unique<jtag::TapController>(*ftdi_);
-    chain_ = std::make_unique<jtag::JtagChain>(*tap_);
-
-    int count = chain_->detectDevices();
-    if (count <= 0) {
-        setStatusMessage("No JTAG devices found. " + chain_->lastError());
-        chain_.reset();
-        tap_.reset();
-        ftdi_.reset();
-        return;
-    }
-
-    connected_ = true;
-
-    // Attach ILA panel to chain.
-    // If a Zynq-7000 PL Config TAP is present (IDCODE[27:0] == 0x03727093),
-    // use BscaneIlaTapBackend targeting that device; otherwise default to
-    // ChainIlaTapBackend at device 0 (dedicated ILA TAP in chain).
-    {
-        int bscane_idx = -1;
-        for (const auto& dev : chain_->devices()) {
-            if ((dev.idcode & 0x0FFFFFFFu) == 0x03727093u) {
-                bscane_idx = dev.position;
-                break;
-            }
-        }
-        if (bscane_idx >= 0) {
-            ila_panel_.setBscaneChain(chain_.get(), bscane_idx);
-        } else {
-            ila_panel_.setChain(chain_.get(), 0);
-        }
-        // Apply persisted signal-lane definitions only when RTL did not
-        // provide them (e.g. older bitstream without SIG_DEF support).
-        if (!ila_panel_.hasSigDefsFromRtl())
-            ila_panel_.importSignalConfigs(config_.ila_signals);
-        ila_panel_.setOrMode(config_.ila_or_mode);
-    }
-
-    // Build device info string
-    char buf[256];
-    snprintf(buf, sizeof(buf), "Connected: %d device(s) in chain", count);
-    std::string status_message = buf;
-
-    // Log IDCODEs
-    for (const auto& dev : chain_->devices()) {
-        snprintf(buf, sizeof(buf), "  Device %d: IDCODE=0x%08X IR_len=%d",
-                 dev.position, dev.idcode, dev.ir_length);
-        status_message += std::string("\n") + buf;
-    }
-    setStatusMessage(status_message);
 }
 
 void AppWindow::onDisconnect() {
@@ -640,19 +609,33 @@ void AppWindow::onDisconnect() {
     if (program_flash_thread_.joinable()) program_flash_thread_.join();
 
     const bool had_backend_state = capturing_ || connected_ ||
+        !daemon_capture_job_id_.empty() ||
         capture_engine_ != nullptr || pin_driver_ != nullptr ||
         scanner_ != nullptr || chain_ != nullptr || tap_ != nullptr ||
         (ftdi_ != nullptr && ftdi_->isOpen());
 
+    // Cancel any in-flight daemon capture job.
+    if (!daemon_capture_job_id_.empty() && gui_client_ &&
+        gui_client_->isConnected()) {
+        try { gui_client_->captureStop(daemon_capture_job_id_); } catch (...) {}
+        daemon_capture_job_id_.clear();
+    }
+
     if (capturing_) {
         onStopCapture();
     }
+
+    // Disconnect GUI RPC client.
+    if (gui_client_) gui_client_->disconnect();
+
     capture_engine_.reset();
     pin_driver_.reset();
     scanner_.reset();
     chain_scanners_.clear();
     chain_drivers_.clear();
     ila_panel_.setChain(nullptr, 0);
+    ila_panel_.setDaemonClient(nullptr, 0, false);
+    daemon_bscane_idx_.store(-1, std::memory_order_release);
     chain_.reset();
     tap_.reset();
     if (ftdi_ && ftdi_->isOpen()) {
@@ -682,11 +665,64 @@ void AppWindow::onDisconnect() {
 }
 
 void AppWindow::onOpenBsdl() {
-    if (!connected_ || !chain_) return;
+    if (!connected_) return;
+
+    // If we are in daemon mode but the RPC link has dropped, report it clearly
+    // instead of silently falling through to the direct path (which fails too
+    // because chain_ is always null in Phase-5 daemon mode).
+    if (!chain_ && gui_client_ && !gui_client_->isConnected()) {
+        DebugLogPanel::append("[daemon] BSDL load failed: daemon RPC disconnected");
+        setStatusMessage("Error: daemon disconnected. Please reconnect.");
+        return;
+    }
 
     std::string path = openFileDialog("Open BSDL File",
         "BSDL Files (*.bsdl;*.bsd)\0*.bsdl;*.bsd\0All Files (*.*)\0*.*\0");
     if (path.empty()) return;
+
+    // ── Daemon path ──────────────────────────────────────────────────────────
+    if (gui_client_ && gui_client_->isConnected() && !chain_) {
+        int dev_idx = 0;
+        try {
+            gui_client_->loadBsdl(dev_idx, path);
+            const auto pins_json = gui_client_->listPins(dev_idx);
+            std::vector<std::string> obs, drv;
+            if (pins_json.contains("observable") &&
+                pins_json["observable"].is_array()) {
+                for (const auto& p : pins_json["observable"])
+                    obs.push_back(p.get<std::string>());
+            }
+            if (pins_json.contains("drivable") &&
+                pins_json["drivable"].is_array()) {
+                for (const auto& p : pins_json["drivable"])
+                    drv.push_back(p.get<std::string>());
+            }
+            SignalPanel::populateFromPinLists(obs, drv);
+            // Restore previously selected pins if BSDL path matches.
+            if (path == config_.bsdl_path && !config_.selected_pins.empty())
+                SignalPanel::setSelectedSignals(config_.selected_pins);
+
+            bsdl_device_index_ = dev_idx;
+            config_.bsdl_path         = path;
+            config_.bsdl_device_index = dev_idx;
+            config_.save("cfg.json");
+            extest_outputs_active_ = false;
+            TriggerDialog::bind(nullptr, nullptr);
+
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                     "BSDL loaded via daemon. %zu observable / %zu drivable pins.",
+                     obs.size(), drv.size());
+            setStatusMessage(buf);
+        } catch (const std::exception& e) {
+            DebugLogPanel::append(std::string("[daemon] BSDL load error: ") + e.what());
+            setStatusMessage(std::string("BSDL load error: ") + e.what());
+        }
+        return;
+    }
+
+    // ── Direct path ──────────────────────────────────────────────────────────
+    if (!chain_) return;
 
     // Load for first device by default (device 0)
     int dev_idx = 0;
@@ -817,6 +853,43 @@ void AppWindow::onOpenBsdl() {
 }
 
 bool AppWindow::refreshPinReadback(bool report_status) {
+    // ── Daemon path ──────────────────────────────────────────────────────────
+    if (gui_client_ && gui_client_->isConnected() && !scanner_) {
+        if (bsdl_device_index_ < 0) {
+            if (report_status) setStatusMessage("No BSDL loaded (daemon mode).");
+            return false;
+        }
+        try {
+            const auto result = gui_client_->sampleBsr(bsdl_device_index_);
+            pin_readback_.pin_states.clear();
+            pin_readback_.raw_bsr.clear();
+            if (result.contains("pins") && result["pins"].is_object()) {
+                for (auto it = result["pins"].begin();
+                     it != result["pins"].end(); ++it) {
+                    jtag::PinState st = jtag::PinState::UNKNOWN;
+                    const std::string& sv = it.value().get<std::string>();
+                    if (sv == "high") st = jtag::PinState::HIGH;
+                    else if (sv == "low") st = jtag::PinState::LOW;
+                    pin_readback_.pin_states[it.key()] = st;
+                }
+            }
+            pin_readback_error_.clear();
+            extest_outputs_active_ = false;
+            if (report_status) {
+                setStatusMessage("Pin readback via daemon: " +
+                                 std::to_string(pin_readback_.pin_states.size()) +
+                                 " pins.");
+            }
+            return true;
+        } catch (const std::exception& e) {
+            pin_readback_error_ = e.what();
+            if (report_status)
+                setStatusMessage("Readback failed: " + pin_readback_error_);
+            return false;
+        }
+    }
+
+    // ── Direct path ──────────────────────────────────────────────────────────
     if (!scanner_) {
         if (report_status) {
             setStatusMessage("Scanner not ready.");
@@ -850,6 +923,40 @@ bool AppWindow::refreshPinReadback(bool report_status) {
 
 void AppWindow::drawPinControlPanel() {
     ImGui::Begin("Pin Control");
+
+    // ── Daemon mode: limited read-only view ──────────────────────────────────
+    if (gui_client_ && gui_client_->isConnected() && !scanner_) {
+        if (bsdl_device_index_ < 0) {
+            ImGui::TextDisabled("Load a BSDL file to enable pin readback.");
+            ImGui::End();
+            return;
+        }
+        if (capturing_) {
+            ImGui::TextDisabled("Stop capture before driving pins.");
+            ImGui::End();
+            return;
+        }
+        if (ImGui::Button("Readback (SAMPLE)")) {
+            refreshPinReadback(true);
+        }
+        ImGui::Separator();
+        if (!pin_readback_.pin_states.empty()) {
+            ImGui::TextDisabled("Read-only pin state from daemon:");
+            for (const auto& [name, state] : pin_readback_.pin_states) {
+                const char* sv = (state == jtag::PinState::HIGH) ? "HIGH"
+                               : (state == jtag::PinState::LOW)  ? "LOW"
+                               : "?";
+                ImGui::Text("  %-32s  %s", name.c_str(), sv);
+            }
+        } else if (!pin_readback_error_.empty()) {
+            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1),
+                               "Error: %s", pin_readback_error_.c_str());
+        }
+        ImGui::Separator();
+        ImGui::TextDisabled("EXTEST pin drive: use Script Runner in daemon mode.");
+        ImGui::End();
+        return;
+    }
 
     if (!scanner_ || !pin_driver_) {
         ImGui::TextDisabled("Load a BSDL file to enable EXTEST pin control.");
@@ -1038,26 +1145,47 @@ void AppWindow::drawScriptRunnerPanel() {
     ImGui::InputTextMultiline("##script_text", script_buffer_.data(),
                               script_buffer_.size(), ImVec2(-FLT_MIN, 220.0f));
 
-    const bool can_run_script = scanner_ != nullptr && pin_driver_ != nullptr &&
-        !capturing_;
+    const bool daemon_mode = gui_client_ && gui_client_->isConnected() && !scanner_;
+    const bool can_run_script =
+        (!daemon_mode && scanner_ != nullptr && pin_driver_ != nullptr && !capturing_) ||
+        (daemon_mode && bsdl_device_index_ >= 0 && !capturing_);
     if (!can_run_script) {
         ImGui::BeginDisabled();
     }
     if (ImGui::Button("Run Script")) {
-        GuiScriptHost host(*scanner_, *pin_driver_, extest_outputs_active_);
-        const auto result = jtag::script::ScriptEngine::run(
-            std::string(script_buffer_.data()), host);
-        script_output_ = result.output;
-        if (result.success) {
-            if (extest_outputs_active_) {
-                setStatusMessage(
-                    "Script completed successfully. EXTEST outputs remain active until SAMPLE/readback/capture changes the instruction.");
-            } else {
-                setStatusMessage("Script completed successfully.");
+        if (daemon_mode) {
+            // Daemon path: send script text via runScript RPC.
+            try {
+                auto res = gui_client_->runScript(
+                    bsdl_device_index_,
+                    std::string(script_buffer_.data()));
+                script_output_ = res.value("output", "");
+                if (res.value("ok", false)) {
+                    setStatusMessage("Script completed successfully (daemon).");
+                } else {
+                    setStatusMessage("Script failed (daemon).");
+                }
+            } catch (const std::exception& e) {
+                script_output_ = e.what();
+                setStatusMessage("Script error (daemon).");
             }
         } else {
-            setStatusMessage("Script failed at line " +
-                             std::to_string(result.failed_line) + ".");
+            // Direct path.
+            GuiScriptHost host(*scanner_, *pin_driver_, extest_outputs_active_);
+            const auto result = jtag::script::ScriptEngine::run(
+                std::string(script_buffer_.data()), host);
+            script_output_ = result.output;
+            if (result.success) {
+                if (extest_outputs_active_) {
+                    setStatusMessage(
+                        "Script completed successfully. EXTEST outputs remain active until SAMPLE/readback/capture changes the instruction.");
+                } else {
+                    setStatusMessage("Script completed successfully.");
+                }
+            } else {
+                setStatusMessage("Script failed at line " +
+                                 std::to_string(result.failed_line) + ".");
+            }
         }
     }
     if (!can_run_script) {
@@ -1071,7 +1199,7 @@ void AppWindow::drawScriptRunnerPanel() {
     if (!can_run_script) {
         ImGui::TextDisabled(
             "Load a BSDL and stop capture before running scripts.");
-    } else if (!pin_driver_->extestAllowed()) {
+    } else if (!daemon_mode && !pin_driver_->extestAllowed()) {
         ImGui::TextColored(
             ImVec4(1.0f, 0.55f, 0.35f, 1.0f),
             "Drive commands are blocked for this device. sample/read/expect/sleep remain available.");
@@ -1155,6 +1283,34 @@ void AppWindow::drawScriptRunnerPanel() {
 }
 
 void AppWindow::onStartCapture() {
+    // Daemon path: submit capture_start job and track job_id.
+    if (gui_client_ && gui_client_->isConnected() && !capture_engine_) {
+        if (bsdl_device_index_ < 0) return;
+        if (capturing_) return;
+        try {
+            const std::string mode_str =
+                (run_mode_ == jtag::TriggerMode::SINGLE) ? "single" :
+                (run_mode_ == jtag::TriggerMode::NORMAL) ? "normal" : "free_run";
+            auto result = gui_client_->captureStart(bsdl_device_index_, 10000,
+                                                    1000, mode_str);
+            if (result.contains("job_id")) {
+                daemon_capture_job_id_ = result["job_id"].get<std::string>();
+                capturing_ = true;
+                extest_outputs_active_ = false;
+                cached_samples_.clear();
+                last_refresh_ = std::chrono::steady_clock::now();
+                syncSelectionViews(std::vector<jtag::SampleFrame>{});
+                WaveformView::requestResetView();
+                setStatusMessage("Capturing via daemon...");
+            } else {
+                setStatusMessage("Capture error: no job_id returned");
+            }
+        } catch (const std::exception& e) {
+            setStatusMessage(std::string("Capture error: ") + e.what());
+        }
+        return;
+    }
+    // Direct path.
     if (!capture_engine_) return;
     if (capture_engine_->state() != jtag::CaptureState::STOPPED)
         capture_engine_->stop();
@@ -1173,6 +1329,17 @@ void AppWindow::onStartCapture() {
 }
 
 void AppWindow::onStopCapture() {
+    // Daemon path.
+    if (!daemon_capture_job_id_.empty()) {
+        try {
+            gui_client_->captureStop(daemon_capture_job_id_);
+        } catch (...) {}
+        // refreshFromCapture() will notice the job_id and fetch final samples.
+        capturing_ = false;
+        refreshFromCapture();
+        return;
+    }
+    // Direct path.
     if (!capture_engine_) return;
     capture_engine_->stop();
     capturing_ = false;
@@ -1184,6 +1351,31 @@ void AppWindow::onStopCapture() {
 }
 
 void AppWindow::onSingleCapture() {
+    // Daemon path.
+    if (gui_client_ && gui_client_->isConnected() && !capture_engine_) {
+        if (bsdl_device_index_ < 0) return;
+        if (capturing_) return;
+        try {
+            auto result = gui_client_->captureStart(bsdl_device_index_, 10000,
+                                                    1000, "single");
+            if (result.contains("job_id")) {
+                daemon_capture_job_id_ = result["job_id"].get<std::string>();
+                capturing_ = true;
+                extest_outputs_active_ = false;
+                cached_samples_.clear();
+                last_refresh_ = std::chrono::steady_clock::now();
+                syncSelectionViews(std::vector<jtag::SampleFrame>{});
+                WaveformView::requestResetView();
+                setStatusMessage("Single capture via daemon...");
+            } else {
+                setStatusMessage("Capture error: no job_id returned");
+            }
+        } catch (const std::exception& e) {
+            setStatusMessage(std::string("Capture error: ") + e.what());
+        }
+        return;
+    }
+    // Direct path.
     if (!capture_engine_) return;
     if (capture_engine_->state() != jtag::CaptureState::STOPPED)
         capture_engine_->stop();
@@ -1200,9 +1392,11 @@ void AppWindow::onSingleCapture() {
 }
 
 void AppWindow::onClearWaveforms() {
-    if (!capture_engine_ || capturing_) return;
-
-    capture_engine_->clearSamples();
+    if (capturing_) return;
+    if (!daemon_capture_job_id_.empty() || capture_engine_) {
+        if (capture_engine_) capture_engine_->clearSamples();
+    }
+    daemon_capture_job_id_.clear();
     cached_samples_.clear();
     syncSelectionViews(std::vector<jtag::SampleFrame>{});
     WaveformView::requestResetView();
@@ -1214,7 +1408,9 @@ void AppWindow::onFitWaveforms() {
         setStatusMessage("No selected waveforms to fit.");
         return;
     }
-    if (!capture_engine_ || capture_engine_->sampleCount() == 0) {
+    const bool has_data = !cached_samples_.empty() ||
+        (capture_engine_ && capture_engine_->sampleCount() > 0);
+    if (!has_data) {
         setStatusMessage("No waveform data to fit.");
         return;
     }
@@ -1223,6 +1419,69 @@ void AppWindow::onFitWaveforms() {
 }
 
 void AppWindow::refreshFromCapture() {
+    // ── Daemon capture polling path ──────────────────────────────────────────
+    if (!daemon_capture_job_id_.empty()) {
+        try {
+            auto snap = gui_client_->captureGetSamples(daemon_capture_job_id_);
+            // snap keys: state, progress, result, error
+            const std::string job_state = snap.value("state", "");
+            const auto& progress = snap.value("progress", nlohmann::json{});
+            const auto& result   = snap["result"];
+
+            if (job_state == "complete" || job_state == "cancelled" ||
+                job_state == "failed") {
+                // Job is terminal: extract samples from result.
+                if (result.is_object() && result.contains("samples")) {
+                    cached_samples_ = samplesFromJson(result["samples"]);
+                }
+                syncSelectionViews(cached_samples_);
+                if (capturing_) {
+                    capturing_ = false;
+                    char buf[128];
+                    snprintf(buf, sizeof(buf),
+                             "Capture complete via daemon. %zu samples.",
+                             cached_samples_.size());
+                    setStatusMessage(buf);
+                }
+                // Keep job_id so user can export; clear on next start/clear.
+            } else if (capturing_) {
+                // Job still running: update waveform with partial samples
+                // when the daemon includes them in the progress payload.
+                if (progress.is_object()) {
+                    if (progress.contains("samples") &&
+                        progress["samples"].is_array()) {
+                        auto partial = samplesFromJson(progress["samples"]);
+                        if (!partial.empty()) {
+                            cached_samples_ = std::move(partial);
+                            syncSelectionViews(cached_samples_);
+                        }
+                    }
+                    if (progress.contains("count")) {
+                        static const char* kDots[] = {".", "..", "...", "...."};
+                        static int dot_idx = 0;
+                        dot_idx = (dot_idx + 1) % 4;
+                        char buf[128];
+                        snprintf(buf, sizeof(buf),
+                                 "Capturing%s  %d samples (daemon)",
+                                 kDots[dot_idx],
+                                 progress["count"].get<int>());
+                        setStatusMessage(buf);
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            // Network error or daemon gone; mark capture as stopped.
+            if (capturing_) {
+                capturing_ = false;
+                daemon_capture_job_id_.clear();
+                setStatusMessage(std::string("Daemon capture poll failed: ") +
+                                 e.what());
+            }
+        }
+        return;
+    }
+
+    // ── Direct capture path ──────────────────────────────────────────────────
     if (!capture_engine_ || !scanner_) return;
 
     auto samples = capture_engine_->getSamples();
@@ -1265,8 +1524,8 @@ void AppWindow::refreshFromCapture() {
 }
 
 void AppWindow::onExportVcd() {
-    if (!capture_engine_) return;
-    auto samples = capture_engine_->getSamples();
+    const auto samples = capture_engine_ ? capture_engine_->getSamples()
+                                         : cached_samples_;
     if (samples.empty()) {
         setStatusMessage("No data to export.");
         return;
@@ -1288,8 +1547,8 @@ void AppWindow::onExportVcd() {
 }
 
 void AppWindow::onExportCsv() {
-    if (!capture_engine_) return;
-    auto samples = capture_engine_->getSamples();
+    const auto samples = capture_engine_ ? capture_engine_->getSamples()
+                                         : cached_samples_;
     if (samples.empty()) {
         setStatusMessage("No data to export.");
         return;
@@ -1892,13 +2151,15 @@ void AppWindow::buildMenuBar() {
                 onSaveConfig();
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Export VCD...", nullptr, false,
-                                capture_engine_ != nullptr)) {
-                onExportVcd();
-            }
-            if (ImGui::MenuItem("Export CSV...", nullptr, false,
-                                capture_engine_ != nullptr)) {
-                onExportCsv();
+            {
+                const bool has_data = capture_engine_ != nullptr ||
+                                      !cached_samples_.empty();
+                if (ImGui::MenuItem("Export VCD...", nullptr, false, has_data)) {
+                    onExportVcd();
+                }
+                if (ImGui::MenuItem("Export CSV...", nullptr, false, has_data)) {
+                    onExportCsv();
+                }
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
@@ -1918,7 +2179,9 @@ void AppWindow::buildMenuBar() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Capture")) {
-            bool can_capture = (capture_engine_ != nullptr && !capturing_);
+            const bool daemon_cap =
+                gui_client_ && gui_client_->isConnected() && bsdl_device_index_ >= 0;
+            bool can_capture = (capture_engine_ != nullptr || daemon_cap) && !capturing_;
             if (ImGui::MenuItem("Run", "F5", false, can_capture)) {
                 onStartCapture();
             }
@@ -2003,18 +2266,6 @@ void AppWindow::buildMenuBar() {
                 if (ImGui::MenuItem("Detect Devices (via Daemon)", nullptr, false, can_detect)) {
                     onDaemonDetectDevices();
                 }
-                ImGui::Separator();
-                // -- Existing in-process MCP section --
-                const bool running = (mcp_mode_ != McpMode::kOff);
-                if (ImGui::MenuItem("Start (stdio)", nullptr, false, !running && connected_)) {
-                    onMcpStartStdio();
-                }
-                if (ImGui::MenuItem("Start (TCP :4711)", nullptr, false, !running && connected_)) {
-                    onMcpStartTcp(4711);
-                }
-                if (ImGui::MenuItem("Stop", nullptr, false, running)) {
-                    onMcpStop();
-                }
                 ImGui::EndMenu();
             }
             ImGui::EndMenu();
@@ -2083,7 +2334,12 @@ void AppWindow::buildMenuBar() {
 // ── PL Programming ──────────────────────────────────────────────────
 
 void AppWindow::onProgramPl() {
-    if (!connected_ || !chain_) return;
+    if (!connected_) return;
+    if (gui_client_ && gui_client_->isConnected() && !chain_) {
+        setStatusMessage("PL programming not yet available in daemon mode.");
+        return;
+    }
+    if (!chain_) return;
     if (program_pl_running_.load()) return;
 
     std::string path = openFileDialog(
@@ -2329,76 +2585,6 @@ void AppWindow::drawProgramFlashModal() {
     }
 }
 
-// ── MCP server ─────────────────────────────────────────────────────
-
-void AppWindow::onMcpStartStdio() {
-    if (mcp_mode_ != McpMode::kOff) return;
-    if (!connected_) return;
-
-    // Release the GUI's FTDI handle before the MCP executor opens its own.
-    onDisconnect();
-
-    mcp_executor_ = std::make_unique<hardware::HardwareExecutor>(config_);
-    std::string err = mcp_executor_->start();
-    if (!err.empty()) {
-        setStatusMessage("MCP executor start failed: " + err);
-        mcp_executor_.reset();
-        return;
-    }
-
-    mcp_bridge_ = std::make_unique<mcp::ExecutorBridge>(*mcp_executor_);
-
-    mcp_server_ = std::make_unique<mcp::McpServer>(
-        mcp::ServerInfo{"owltap-mcp", "0.1.0"});
-    mcp_server_->setExecutorBridge(mcp_bridge_.get());
-    mcp::tools::registerHardwareTools(mcp_server_->registry(), *mcp_bridge_);
-    mcp_server_->setTransport(std::make_unique<mcp::StdioTransport>());
-    mcp_server_->start();
-    mcp_mode_ = McpMode::kStdio;
-    setStatusMessage("MCP server started (stdio).");
-}
-
-void AppWindow::onMcpStartTcp(uint16_t port) {
-    if (mcp_mode_ != McpMode::kOff) return;
-    if (!connected_) return;
-
-    // Release the GUI's FTDI handle before the MCP executor opens its own.
-    onDisconnect();
-
-    mcp_executor_ = std::make_unique<hardware::HardwareExecutor>(config_);
-    std::string err = mcp_executor_->start();
-    if (!err.empty()) {
-        setStatusMessage("MCP executor start failed: " + err);
-        mcp_executor_.reset();
-        return;
-    }
-
-    mcp_bridge_ = std::make_unique<mcp::ExecutorBridge>(*mcp_executor_);
-
-    mcp_server_ = std::make_unique<mcp::McpServer>(
-        mcp::ServerInfo{"owltap-mcp", "0.1.0"});
-    mcp_server_->setExecutorBridge(mcp_bridge_.get());
-    mcp::tools::registerHardwareTools(mcp_server_->registry(), *mcp_bridge_);
-    mcp_server_->setTransport(
-        std::make_unique<mcp::TcpTransport>(port));
-    mcp_server_->start();
-    mcp_tcp_port_ = port;
-    mcp_mode_ = McpMode::kTcp;
-
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "MCP server started (TCP port %u).", port);
-    setStatusMessage(buf);
-}
-
-void AppWindow::onMcpStop() {
-    if (mcp_mode_ == McpMode::kOff) return;
-    if (mcp_server_) { mcp_server_->stop(); mcp_server_.reset(); }
-    if (mcp_bridge_) { mcp_bridge_.reset(); }
-    if (mcp_executor_) { mcp_executor_->shutdown(); mcp_executor_.reset(); }
-    mcp_mode_ = McpMode::kOff;
-    setStatusMessage("MCP server stopped.");
-}
-
 // ── Daemon process controller actions ────────────────────────────────────────
 
 // Attempt to locate jtag_daemon.exe adjacent to the running executable.
@@ -2487,20 +2673,30 @@ void AppWindow::onDaemonConnect() {
             const int count = devs.value("device_count", 0);
             report += "[daemon] detect_devices: " + std::to_string(count) +
                       " device(s)\n";
+            int bscane_idx = -1;
             if (devs.contains("devices") && devs["devices"].is_array()) {
                 for (const auto& d : devs["devices"]) {
+                    const int pos = d.value("position", -1);
                     char buf[128];
                     std::snprintf(buf, sizeof(buf),
                                   "[daemon]   [%d] IDCODE=%s ir_len=%d bsdl=%s",
-                                  d.value("position", -1),
+                                  pos,
                                   d.value("idcode", "?").c_str(),
                                   d.value("ir_length", 0),
                                   d.value("bsdl_loaded", false) ? "loaded" : "none");
                     report += std::string(buf) + "\n";
+                    // Detect Zynq PL Config TAP: lower 28 bits of IDCODE = 0x3727093.
+                    const std::string id_str = d.value("idcode", "0x0");
+                    uint32_t idcode = 0;
+                    std::sscanf(id_str.c_str(), "0x%x", &idcode); // NOLINT(cert-err34-c)
+                    if ((idcode & 0x0FFFFFFFu) == 0x03727093u && bscane_idx < 0)
+                        bscane_idx = pos;
                 }
             }
+            daemon_bscane_idx_.store(bscane_idx, std::memory_order_release);
         } catch (const std::exception& e) {
             report += std::string("[daemon] detect_devices error: ") + e.what() + "\n";
+            daemon_bscane_idx_.store(-1, std::memory_order_release);
         }
 
         std::lock_guard<std::mutex> lk(daemon_connect_mutex_);
@@ -2573,7 +2769,18 @@ void AppWindow::drainDaemonLog() {
         }
     }
 
-    // Drain result from background daemon-connect operation (Phase 3).
+    // Phase 5: auto-connect GUI RPC when daemon is ready and connect is pending.
+    if (pending_daemon_connect_ && ds.state == DaemonState::kRunning &&
+        ds.gui_port != 0 &&
+        !daemon_connect_running_.load(std::memory_order_acquire)) {
+        pending_daemon_connect_ = false;
+        onDaemonConnect();
+    } else if (pending_daemon_connect_ && ds.state == DaemonState::kError) {
+        pending_daemon_connect_ = false;
+        setStatusMessage("Daemon failed to start. Cannot connect.");
+    }
+
+    // Drain result from background daemon-connect operation (Phase 3 / 5).
     if (!daemon_connect_running_.load(std::memory_order_acquire)) {
         std::string result;
         {
@@ -2584,6 +2791,18 @@ void AppWindow::drainDaemonLog() {
             DebugLogPanel::append(result);
             if (daemon_connect_thread_.joinable()) {
                 daemon_connect_thread_.join();
+            }
+            // Phase 5: set connected_ = true when daemon RPC connect succeeds.
+            if (gui_client_ && gui_client_->isConnected() && !connected_) {
+                connected_ = true;
+                // Wire ILA panel to daemon. Use BSCANE2 if a Zynq PL TAP was
+                // found; fall back to ChainIla at device 0 otherwise.
+                const int bscane = daemon_bscane_idx_.load(std::memory_order_acquire);
+                if (bscane >= 0) {
+                    ila_panel_.setDaemonClient(gui_client_.get(), bscane, true);
+                } else {
+                    ila_panel_.setDaemonClient(gui_client_.get(), 0, false);
+                }
             }
         }
     }

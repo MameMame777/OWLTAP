@@ -14,6 +14,7 @@
 #include "src/hardware/capture_session.h"
 #include "src/hardware/hardware_context.h"
 #include "src/ila/ila_driver.h"
+#include "src/ila/bscane_ila_tap_backend.h"
 #include "src/ila/ila_tap_backend.h"
 #include "src/script/script_engine.h"
 
@@ -409,6 +410,11 @@ void registerHardwareTools(ToolRegistry& registry, ExecutorBridge& bridge) {
                     cs.trigger().setMode(tmode);
                     cs.start();
 
+                    // Report partial samples in progress so GUI can display
+                    // live waveform updates without waiting for full completion.
+                    std::size_t last_reported_count = 0;
+                    static constexpr std::size_t kProgressBatchSize = 20;
+
                     while (cs.state() != CaptureState::COMPLETE &&
                            cs.state() != CaptureState::STOPPED) {
                         if (job.isCancelRequested()) {
@@ -416,10 +422,19 @@ void registerHardwareTools(ToolRegistry& registry, ExecutorBridge& bridge) {
                             break;
                         }
                         cs.tick();
-                        job.setProgress(nlohmann::json{
-                            {"state", "capturing"},
-                            {"count",
-                             static_cast<int>(cs.sampleCount())}});
+                        const std::size_t n = cs.sampleCount();
+                        if (n >= last_reported_count + kProgressBatchSize ||
+                            (n > 0 && last_reported_count == 0)) {
+                            last_reported_count = n;
+                            job.setProgress(nlohmann::json{
+                                {"state",   "capturing"},
+                                {"count",   static_cast<int>(n)},
+                                {"samples", samplesToJson(cs.getSamples())}});
+                        } else {
+                            job.setProgress(nlohmann::json{
+                                {"state", "capturing"},
+                                {"count", static_cast<int>(n)}});
+                        }
                         std::this_thread::sleep_for(
                             std::chrono::milliseconds(1));
                     }
@@ -557,28 +572,40 @@ void registerHardwareTools(ToolRegistry& registry, ExecutorBridge& bridge) {
         {
             {"type", "object"},
             {"required", {"device_index"}},
-            {"properties", {{"device_index", {{"type", "integer"}}}}}
+            {"properties", {
+                {"device_index", {{"type", "integer"}}},
+                {"use_bscane",   {{"type", "boolean"},
+                                   {"description",
+                                    "true = access ILA via BSCANE2 TAP (default false)"}}}
+            }}
         },
         [&bridge](nlohmann::json params) -> nlohmann::json {
-            int dev_idx = params["device_index"].get<int>();
+            int  dev_idx   = params["device_index"].get<int>();
+            bool use_bscane = params.value("use_bscane", false);
             return bridge.submitSync(
-                [dev_idx](hardware::HardwareContext& ctx,
+                [dev_idx, use_bscane](hardware::HardwareContext& ctx,
                           hardware::HardwareJob& /*job*/) -> nlohmann::json {
-                    ila::ChainIlaTapBackend backend(ctx.chain(), dev_idx);
-                    ila::IlaDriver ila(backend);
+                    std::unique_ptr<ila::IlaTapBackend> backend;
+                    if (use_bscane)
+                        backend = std::make_unique<ila::BscaneIlaTapBackend>(
+                                      ctx.chain(), dev_idx);
+                    else
+                        backend = std::make_unique<ila::ChainIlaTapBackend>(
+                                      ctx.chain(), dev_idx);
+                    ila::IlaDriver ila(*backend);
 
                     ila::IlaCaps caps;
                     if (!ila.probe(caps)) {
-                        throw std::runtime_error(backend.lastError());
+                        throw std::runtime_error(backend->lastError());
                     }
 
                     ila::IlaStatus status;
                     if (!ila.readStatus(status)) {
-                        throw std::runtime_error(backend.lastError());
+                        throw std::runtime_error(backend->lastError());
                     }
 
                     return nlohmann::json{
-                        {"version",   caps.version},
+                        {"version",    caps.version},
                         {"data_width", caps.data_w},
                         {"addr_width", caps.addr_w},
                         {"depth",      caps.depth},

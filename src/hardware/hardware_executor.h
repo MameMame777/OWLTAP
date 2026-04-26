@@ -47,6 +47,12 @@ public:
     // Returns empty string on success, or a human-readable error on failure.
     std::string start();
 
+    // Start the worker thread WITHOUT opening the hardware device.
+    // Never fails. Hardware is opened lazily when the first task is submitted.
+    // If the device cannot be opened when a task runs, that task fails with
+    // an error; subsequent tasks will retry the open.
+    void startWorker();
+
     // True after start() and before shutdown().
     bool isRunning() const;
 

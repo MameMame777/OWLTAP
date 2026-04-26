@@ -152,13 +152,10 @@ int main(int argc, char* argv[]) {
                  cfg.interface_channel, cfg.clock_freq_hz);
 
     jtag::hardware::HardwareExecutor executor(cfg);
-    const std::string hw_err = executor.start();
-    if (!hw_err.empty()) {
-        printErrorEvent("hardware executor start failed: " + hw_err);
-        std::fprintf(stderr, "[jtag_daemon] ERROR: %s\n", hw_err.c_str());
-        return 1;
-    }
-    std::fprintf(stderr, "[jtag_daemon] Hardware executor running.\n");
+    // Use startWorker() — hardware is opened lazily when the first tool is
+    // invoked, so the daemon starts successfully even if the device is absent.
+    executor.startWorker();
+    std::fprintf(stderr, "[jtag_daemon] Hardware executor running (lazy open).\n");
 
     jtag::mcp::ExecutorBridge bridge(executor);
     jtag::mcp::McpServer mcp_server({"owltap-jtag-daemon", "0.1.0"});

@@ -63,6 +63,15 @@ std::string HardwareExecutor::start() {
     return {};
 }
 
+void HardwareExecutor::startWorker() {
+    if (running_.load()) return;
+
+    // Do NOT open hardware here — deferred until first task execution.
+    stop_flag_.store(false);
+    worker_ = std::thread(&HardwareExecutor::workerLoop, this);
+    running_.store(true);
+}
+
 bool HardwareExecutor::isRunning() const {
     return running_.load(std::memory_order_acquire);
 }
@@ -151,6 +160,13 @@ void HardwareExecutor::workerLoop() {
 
         handle->setState(JobState::kRunning);
         try {
+            // Auto-open hardware if not already open (lazy-start path).
+            if (!context_->isOpen()) {
+                std::string open_err = context_->open();
+                if (!open_err.empty()) {
+                    throw std::runtime_error("hardware open failed: " + open_err);
+                }
+            }
             nlohmann::json result = task(*context_, *handle);
             if (handle->isCancelRequested()) {
                 handle->setState(JobState::kCancelled);

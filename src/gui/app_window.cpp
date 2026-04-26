@@ -262,6 +262,8 @@ AppWindow::AppWindow() {
     glfwSetErrorCallback(glfwErrorCallback);
     if (!glfwInit()) return;
 
+    daemon_ctrl_ = std::make_unique<DaemonProcessController>();
+
     // Load saved config
     config_ = AppConfig::load("cfg.json");
 
@@ -395,6 +397,7 @@ void AppWindow::run() {
         drawScriptRunnerPanel();
         drawInterconnectPanel();
         ila_panel_.draw();
+        drainDaemonLog();
         DebugLogPanel::draw(status_text_);
 
         // Device dialog
@@ -1948,6 +1951,35 @@ void AppWindow::buildMenuBar() {
             }
             ImGui::Separator();
             if (ImGui::BeginMenu("MCP Server")) {
+                // -- Daemon section --
+                const DaemonStatus ds = daemon_ctrl_->status();
+                const char* state_label =
+                    ds.state == DaemonState::kOff      ? "Daemon: Off" :
+                    ds.state == DaemonState::kStarting ? "Daemon: Starting..." :
+                    ds.state == DaemonState::kRunning  ? "Daemon: Running" :
+                    ds.state == DaemonState::kStopping ? "Daemon: Stopping..." :
+                                                         "Daemon: Error";
+                ImGui::TextDisabled("%s", state_label);
+                if (ds.state == DaemonState::kRunning && ds.mcp_port != 0) {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled(":%u", ds.mcp_port);
+                }
+                if (!ds.error_message.empty()) {
+                    ImGui::TextDisabled("  %s", ds.error_message.c_str());
+                }
+                const bool daemon_off =
+                    (ds.state == DaemonState::kOff || ds.state == DaemonState::kError);
+                const bool daemon_active =
+                    (ds.state == DaemonState::kStarting ||
+                     ds.state == DaemonState::kRunning);
+                if (ImGui::MenuItem("Start Daemon (port 0)", nullptr, false, daemon_off)) {
+                    onDaemonStart();
+                }
+                if (ImGui::MenuItem("Stop Daemon", nullptr, false, daemon_active)) {
+                    onDaemonStop();
+                }
+                ImGui::Separator();
+                // -- Existing in-process MCP section --
                 const bool running = (mcp_mode_ != McpMode::kOff);
                 if (ImGui::MenuItem("Start (stdio)", nullptr, false, !running && connected_)) {
                     onMcpStartStdio();
@@ -2340,6 +2372,70 @@ void AppWindow::onMcpStop() {
     if (mcp_executor_) { mcp_executor_->shutdown(); mcp_executor_.reset(); }
     mcp_mode_ = McpMode::kOff;
     setStatusMessage("MCP server stopped.");
+}
+
+// ── Daemon process controller actions ────────────────────────────────────────
+
+// Attempt to locate jtag_daemon.exe adjacent to the running executable.
+static std::string findDaemonExe() {
+#ifdef _WIN32
+    char buf[MAX_PATH] = {};
+    GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    std::string dir(buf);
+    const auto slash = dir.find_last_of("\\/");
+    dir = (slash != std::string::npos) ? dir.substr(0, slash + 1) : "";
+    const std::string candidates[] = {
+        dir + "jtag_daemon.exe",
+        dir + "tools\\jtag_daemon.exe",
+        std::string("bazel-bin\\src\\tools\\jtag_daemon.exe"),
+    };
+    for (const auto& c : candidates) {
+        if (GetFileAttributesA(c.c_str()) != INVALID_FILE_ATTRIBUTES) return c;
+    }
+#endif
+    return {};
+}
+
+void AppWindow::onDaemonStart() {
+    const std::string exe = findDaemonExe();
+    if (exe.empty()) {
+        DebugLogPanel::append("[daemon] Cannot find jtag_daemon.exe");
+        setStatusMessage("Daemon not found.");
+        return;
+    }
+    if (!daemon_ctrl_->start(exe, "cfg.json", /*mcp_port=*/0)) {
+        DebugLogPanel::append("[daemon] Failed to start daemon process");
+        setStatusMessage("Daemon start failed.");
+    } else {
+        setStatusMessage("Daemon starting...");
+    }
+}
+
+void AppWindow::onDaemonStop() {
+    if (daemon_ctrl_->status().state == DaemonState::kOff) return;
+    daemon_ctrl_->stop();
+    setStatusMessage("Daemon stopped.");
+}
+
+void AppWindow::drainDaemonLog() {
+    std::vector<std::string> lines;
+    daemon_ctrl_->drainLog(lines);
+    for (const auto& ln : lines) {
+        DebugLogPanel::append(ln);
+    }
+    // Update status bar when daemon becomes ready.
+    const DaemonStatus ds = daemon_ctrl_->status();
+    if (ds.state == DaemonState::kRunning && ds.mcp_port != 0) {
+        // Only flip the status message once; avoid overwriting user actions.
+        static uint16_t last_reported_port = 0;
+        if (last_reported_port != ds.mcp_port) {
+            last_reported_port = ds.mcp_port;
+            char buf[64];
+            std::snprintf(buf, sizeof(buf),
+                          "Daemon running on 127.0.0.1:%u", ds.mcp_port);
+            setStatusMessage(buf);
+        }
+    }
 }
 
 } // namespace jtag::gui

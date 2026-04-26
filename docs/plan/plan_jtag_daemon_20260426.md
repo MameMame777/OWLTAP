@@ -180,7 +180,7 @@ Track implementation with this status table. Update it whenever a phase starts, 
 |-------|--------|---------------|
 | 1A MCP-only daemon binary | Done | `//src/tools:jtag_daemon` builds and serves MCP TCP with existing tools |
 | 1B daemon lifecycle hardening | Done | Windows console control, `--exit-on-disconnect`, `completedConnections()` counter, all 20 tests pass |
-| 2 GUI process controller | Not started | GUI can spawn/stop daemon and show daemon logs/status |
+| 2 GUI process controller | Done | `DaemonProcessController` spawns/stops daemon, reads ready event, logs to DebugLog; GUI "MCP Server" menu has Start/Stop Daemon items |
 | 3 GUI RPC minimal flow | Not started | GUI can detect devices, load BSDL, list pins through daemon |
 | 4 Capture and ILA migration | Not started | waveform capture and ILA status operate through daemon |
 | 5 Remove GUI direct FTDI ownership | Not started | normal GUI mode has no direct `FtdiDevice` ownership |

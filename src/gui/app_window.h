@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "app_config.h"
+#include "daemon_process_controller.h"
 #include "ila_panel.h"
 #include "src/boundary_scan/pin_driver.h"
 #include "src/boundary_scan/scanner.h"
@@ -80,6 +81,11 @@ private:
     void onMcpStartStdio();
     void onMcpStartTcp(uint16_t port);
     void onMcpStop();
+
+    // Daemon process controller actions
+    void onDaemonStart();
+    void onDaemonStop();
+    void drainDaemonLog();
 
     // PL programming (background thread)
     void onProgramPl();
@@ -164,6 +170,9 @@ private:
     std::thread program_flash_thread_;
 
     AppConfig config_;
+
+    // Daemon process controller (optional; created on connect)
+    std::unique_ptr<DaemonProcessController> daemon_ctrl_;
 
     // MCP server (optional; created on-demand)
     enum class McpMode { kOff, kStdio, kTcp };

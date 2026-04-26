@@ -23,6 +23,7 @@ cc_library(
     srcs = [
         "app_window.cpp",
         "bus_definition.cpp",
+        "daemon_process_controller.cpp",
         "debug_log_panel.cpp",
         "device_dialog.cpp",
         "gui_theme.cpp",
@@ -38,6 +39,7 @@ cc_library(
     hdrs = [
         "app_window.h",
         "bus_definition.h",
+        "daemon_process_controller.h",
         "debug_log_panel.h",
         "device_dialog.h",
         "gui_theme.h",
@@ -79,6 +81,7 @@ cc_library(
         "//third_party/glfw",
         "//third_party/imgui",
         "//third_party/implot",
+        "@nlohmann_json//:json",
     ] + select({
         "@platforms//os:windows": [],
         "//conditions:default": [],

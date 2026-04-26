@@ -650,6 +650,124 @@ void registerHardwareTools(ToolRegistry& registry, ExecutorBridge& bridge) {
             return bridge.cancelJob(params["job_id"].get<std::string>());
         }
     });
+
+    // -----------------------------------------------------------------------
+    // 16. ila_run_capture
+    //     Reset -> configure trigger (match-all) -> arm -> optional force
+    //     -> poll until full -> read all samples.  One-shot synchronous call.
+    // -----------------------------------------------------------------------
+    registry.registerTool({
+        "ila_run_capture",
+        "Arm the OwlTAP ILA, optionally force-trigger, then return waveform samples.",
+        {
+            {"type", "object"},
+            {"required", {"device_index"}},
+            {"properties", {
+                {"device_index", {{"type", "integer"}}},
+                {"use_bscane",   {{"type", "boolean"},
+                                   {"description",
+                                    "true = access ILA via BSCANE2 TAP (default false)"}}},
+                {"force",        {{"type", "boolean"},
+                                   {"description",
+                                    "true = force-trigger immediately after arm (default true)"}}},
+                {"pre_samples",  {{"type", "integer"},
+                                   {"description",
+                                    "Pre-trigger sample count (default 0)"}}},
+                {"timeout_ms",   {{"type", "integer"},
+                                   {"description",
+                                    "Poll timeout in milliseconds (default 5000)"}}}
+            }}
+        },
+        [&bridge](nlohmann::json params) -> nlohmann::json {
+            int  dev_idx    = params["device_index"].get<int>();
+            bool use_bscane = params.value("use_bscane",  false);
+            bool force      = params.value("force",       true);
+            int  pre        = params.value("pre_samples", 0);
+            int  timeout_ms = params.value("timeout_ms",  5000);
+
+            return bridge.submitSync(
+                [dev_idx, use_bscane, force, pre, timeout_ms](
+                    hardware::HardwareContext& ctx,
+                    hardware::HardwareJob& /*job*/) -> nlohmann::json {
+
+                    std::unique_ptr<ila::IlaTapBackend> backend;
+                    if (use_bscane)
+                        backend = std::make_unique<ila::BscaneIlaTapBackend>(
+                                      ctx.chain(), dev_idx);
+                    else
+                        backend = std::make_unique<ila::ChainIlaTapBackend>(
+                                      ctx.chain(), dev_idx);
+
+                    ila::IlaDriver ila(*backend);
+
+                    // 1. Probe capabilities.
+                    ila::IlaCaps caps;
+                    if (!ila.probe(caps))
+                        throw std::runtime_error(ila.lastError());
+
+                    // 2. Reset any previous capture run.
+                    if (!ila.resetCapture())
+                        throw std::runtime_error(ila.lastError());
+
+                    // 3. Configure trigger: match-all (mask=0, value=0).
+                    if (!ila.configureTrigger(0, 0,
+                                              static_cast<uint16_t>(pre)))
+                        throw std::runtime_error(ila.lastError());
+
+                    // 4. Arm.
+                    if (!ila.arm())
+                        throw std::runtime_error(ila.lastError());
+
+                    // 5. Optionally force-trigger.
+                    if (force) {
+                        if (!ila.forceTrigger())
+                            throw std::runtime_error(ila.lastError());
+                    }
+
+                    // 6. Poll readStatus() until full==true or timeout.
+                    const auto deadline =
+                        std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(timeout_ms);
+                    ila::IlaStatus status{};
+                    while (true) {
+                        if (!ila.readStatus(status))
+                            throw std::runtime_error(ila.lastError());
+                        if (status.full)
+                            break;
+                        if (std::chrono::steady_clock::now() >= deadline)
+                            throw std::runtime_error(
+                                "ila_run_capture: timeout waiting for full");
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(10));
+                    }
+
+                    // 7. Read all samples from address 0.
+                    if (!ila.setReadAddr(0))
+                        throw std::runtime_error(ila.lastError());
+                    std::vector<uint32_t> raw;
+                    if (!ila.readSamples(raw))
+                        throw std::runtime_error(ila.lastError());
+
+                    // Encode samples as hex strings for JSON transport.
+                    nlohmann::json sample_arr = nlohmann::json::array();
+                    for (uint32_t v : raw) {
+                        std::ostringstream oss;
+                        oss << "0x" << std::uppercase << std::hex
+                            << std::setfill('0') << std::setw(8) << v;
+                        sample_arr.push_back(oss.str());
+                    }
+
+                    return nlohmann::json{
+                        {"version",      caps.version},
+                        {"data_width",   caps.data_w},
+                        {"depth",        caps.depth},
+                        {"sample_count", static_cast<int>(raw.size())},
+                        {"samples",      sample_arr}};
+                },
+                "ila_run_capture",
+                std::chrono::milliseconds{static_cast<long long>(timeout_ms) + 3000});
+        }
+    });
 }
 
 }  // namespace jtag::mcp::tools

@@ -32,7 +32,7 @@ import time
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-BSDL_PATH  = sys.argv[1] if len(sys.argv) > 1 else "xa7z020_clg484.bsd"
+BSDL_PATH  = sys.argv[1] if len(sys.argv) > 1 else r"HWsample\xa7z020_clg484.bsd"
 DAEMON_EXE = sys.argv[2] if len(sys.argv) > 2 else r"bazel-bin\src\tools\jtag_daemon.exe"
 MCP_PORT   = 9999        # --mcp-port default
 TIMEOUT    = 15.0        # per-call socket timeout (s)
@@ -370,6 +370,33 @@ def test_read_ila_status(sock: socket.socket) -> bool:
     return True
 
 
+def test_ila_capture(sock: socket.socket) -> bool:
+    """ila_run_capture — arm + force-trigger + read samples (smoke test)."""
+    r = extract_json(tool_call(sock, "ila_run_capture",
+                               {"device_index": 0, "use_bscane": True,
+                                "force": True, "pre_samples": 0,
+                                "timeout_ms": 5000},
+                               next_id()))
+    required = {"version", "data_width", "depth", "sample_count", "samples"}
+    missing  = required - set(r.keys())
+    if missing:
+        print(f"    missing fields: {missing}  (response: {r})")
+        return False
+    depth        = r["depth"]
+    sample_count = r["sample_count"]
+    samples      = r["samples"]
+    if sample_count != depth:
+        print(f"    sample_count={sample_count} != depth={depth}")
+        return False
+    if not isinstance(samples, list) or len(samples) == 0:
+        print(f"    samples list is empty or wrong type")
+        return False
+    print(f"    ILA capture OK: depth={depth}  sample_count={sample_count}"
+          f"  data_width={r['data_width']}")
+    print(f"    first sample={samples[0]}  last sample={samples[-1]}")
+    return True
+
+
 def test_capture_stop(sock: socket.socket) -> bool:
     """capture_start (free_run) + immediate capture_stop."""
     r = extract_json(tool_call(sock, "capture_start",
@@ -518,8 +545,11 @@ def main() -> int:
     if ok_bit:
         results.append(run_test("read_ila_status (after ILA bitstream)",
             lambda: test_read_ila_status(sock)))
+        results.append(run_test("ila_run_capture (force-trigger smoke test)",
+            lambda: test_ila_capture(sock)))
     else:
         print(f"\n[SKIP] read_ila_status (bitstream not programmed)")
+        print(f"\n[SKIP] ila_run_capture (bitstream not programmed)")
 
     # ── Teardown ──────────────────────────────────────────────────────
     sock.close()

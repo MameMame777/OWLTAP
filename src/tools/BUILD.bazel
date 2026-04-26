@@ -52,3 +52,21 @@ cc_binary(
         "//conditions:default": [],
     }),
 )
+
+cc_binary(
+    name = "jtag_daemon",
+    srcs = ["jtag_daemon.cpp"],
+    deps = [
+        "//src/gui:app_config",
+        "//src/hardware:hardware_executor",
+        "//src/mcp:executor_bridge",
+        "//src/mcp:mcp_server",
+        "//src/mcp:mcp_transport",
+        "//src/mcp/tools:register_tools",
+        "@nlohmann_json//:json",
+    ],
+    linkopts = select({
+        "@platforms//os:windows": ["-DEFAULTLIB:ws2_32.lib"],
+        "//conditions:default": [],
+    }),
+)

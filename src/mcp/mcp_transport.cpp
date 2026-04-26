@@ -205,7 +205,11 @@ void TcpTransport::start() {
         impl_->port = ntohs(bound.sin_port);
     }
 
-    listen(impl_->server_sock, 1);
+    if (listen(impl_->server_sock, 1) != 0) {
+        closeSocket(impl_->server_sock);
+        impl_->server_sock = kInvalidSocket;
+        return;
+    }
 
     impl_->accept_thread = std::thread([this] {
         while (!impl_->stop_flag.load()) {
@@ -257,5 +261,9 @@ bool TcpTransport::send(const nlohmann::json& msg) {
 }
 
 uint16_t TcpTransport::port() const { return impl_->port; }
+
+bool TcpTransport::isListening() const {
+    return impl_->server_sock != kInvalidSocket;
+}
 
 }  // namespace jtag::mcp

@@ -66,6 +66,9 @@ public:
     // Actual bound port (useful if 0 was passed to let the OS choose).
     uint16_t port() const;
 
+    // True after start() successfully binds and listens.
+    bool isListening() const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

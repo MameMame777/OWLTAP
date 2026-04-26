@@ -184,6 +184,14 @@ private:
     std::string       daemon_connect_result_;  // set by bg thread, cleared on drain
     std::thread       daemon_connect_thread_;
 
+    // Daemon hardware ownership cache — updated by periodic background poll.
+    // Reflects hardware state as reported by the daemon's daemon/status RPC.
+    std::atomic<bool> daemon_hw_open_{false};
+    std::atomic<int>  daemon_device_count_{0};
+    std::chrono::steady_clock::time_point last_daemon_status_poll_{};
+    std::atomic<bool> daemon_status_poll_running_{false};
+    std::thread       daemon_status_poll_thread_;
+
     // MCP server (optional; created on-demand)
     enum class McpMode { kOff, kStdio, kTcp };
     McpMode                                    mcp_mode_{McpMode::kOff};

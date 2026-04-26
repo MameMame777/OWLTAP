@@ -184,13 +184,35 @@ int main(int argc, char* argv[]) {
     if (gui_rpc) {
         gui_server = std::make_unique<jtag::mcp::GuiRpcServer>(gui_port);
 
-        // daemon/status — no hardware access needed.
+        // daemon/status — queries hardware state from the worker thread.
         gui_server->registerMethod("daemon/status",
-            [](const nlohmann::json&) -> nlohmann::json {
-                return nlohmann::json{
-                    {"version", "0.1.0"},
-                    {"status",  "running"}
-                };
+            [&bridge](const nlohmann::json&) -> nlohmann::json {
+                return bridge.submitSync(
+                    [](jtag::hardware::HardwareContext& ctx,
+                       jtag::hardware::HardwareJob& /*job*/) -> nlohmann::json {
+                        nlohmann::json devs = nlohmann::json::array();
+                        for (const auto& d : ctx.chain().devices()) {
+                            char idcode_buf[12];
+                            std::snprintf(idcode_buf, sizeof(idcode_buf),
+                                          "0x%08X", d.idcode);
+                            devs.push_back({
+                                {"position",    d.position},
+                                {"idcode",      idcode_buf},
+                                {"ir_length",   d.ir_length},
+                                {"bsdl_loaded", d.bsdl != nullptr},
+                                {"entity",      d.bsdl ? d.bsdl->entity_name : ""},
+                            });
+                        }
+                        return nlohmann::json{
+                            {"version",       "0.1.0"},
+                            {"status",        "running"},
+                            {"hardware_open", ctx.isOpen()},
+                            {"device_count",  ctx.chain().deviceCount()},
+                            {"devices",       devs},
+                        };
+                    },
+                    "daemon/status",
+                    std::chrono::milliseconds{1000});
             });
 
         // Delegate hardware methods to registered MCP tool handlers.

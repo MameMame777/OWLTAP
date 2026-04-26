@@ -339,6 +339,11 @@ AppWindow::~AppWindow() {
 
     onDisconnect();
 
+    // Disconnect GUI RPC client and join background threads.
+    if (gui_client_ && gui_client_->isConnected()) gui_client_->disconnect();
+    if (daemon_status_poll_thread_.joinable()) daemon_status_poll_thread_.join();
+    if (daemon_connect_thread_.joinable())     daemon_connect_thread_.join();
+
     if (window_) {
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
@@ -474,6 +479,11 @@ void AppWindow::buildStatusBar() {
         // ── Connection ───────────────────────────────────
         if (connected_) {
             ImGui::TextColored(theme::kSuccess, "● Connected");
+        } else if (daemon_hw_open_.load(std::memory_order_acquire)) {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "● Daemon (%d dev)",
+                          daemon_device_count_.load(std::memory_order_acquire));
+            ImGui::TextColored(theme::kAccent, "%s", buf);
         } else {
             ImGui::TextColored(theme::kMuted, "○ Disconnected");
         }
@@ -1897,7 +1907,8 @@ void AppWindow::buildMenuBar() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Device")) {
-            if (ImGui::MenuItem("Connect...", nullptr, false, !connected_)) {
+            if (ImGui::MenuItem("Connect...", nullptr, false,
+                                !connected_ && !daemon_hw_open_.load(std::memory_order_acquire))) {
                 show_device_dialog_ = true;
             }
         if (ImGui::MenuItem("Disconnect", nullptr, false,
@@ -2422,6 +2433,10 @@ void AppWindow::onDaemonStart() {
 void AppWindow::onDaemonStop() {
     if (daemon_ctrl_->status().state == DaemonState::kOff) return;
     if (gui_client_->isConnected()) gui_client_->disconnect();
+    // Join poll thread before resetting — disconnect() causes it to exit promptly.
+    if (daemon_status_poll_thread_.joinable()) daemon_status_poll_thread_.join();
+    daemon_hw_open_.store(false, std::memory_order_release);
+    daemon_device_count_.store(0, std::memory_order_release);
     daemon_ctrl_->stop();
     daemon_last_reported_port_ = 0;
     setStatusMessage("Daemon stopped.");
@@ -2518,6 +2533,35 @@ void AppWindow::drainDaemonLog() {
             if (daemon_connect_thread_.joinable()) {
                 daemon_connect_thread_.join();
             }
+        }
+    }
+
+    // Periodic daemon hardware ownership poll — every 2 s when GUI RPC is live.
+    if (gui_client_ && gui_client_->isConnected() &&
+        !daemon_status_poll_running_.load(std::memory_order_acquire)) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_daemon_status_poll_ > std::chrono::seconds(2)) {
+            last_daemon_status_poll_ = now;
+            daemon_status_poll_running_.store(true, std::memory_order_release);
+            if (daemon_status_poll_thread_.joinable()) {
+                daemon_status_poll_thread_.join();
+            }
+            daemon_status_poll_thread_ = std::thread([this]() {
+                try {
+                    auto j = gui_client_->daemonStatus();
+                    daemon_hw_open_.store(
+                        j.value("hardware_open", false),
+                        std::memory_order_release);
+                    daemon_device_count_.store(
+                        j.value("device_count", 0),
+                        std::memory_order_release);
+                } catch (...) {
+                    // Connection lost — reset cached state.
+                    daemon_hw_open_.store(false, std::memory_order_release);
+                    daemon_device_count_.store(0, std::memory_order_release);
+                }
+                daemon_status_poll_running_.store(false, std::memory_order_release);
+            });
         }
     }
 }

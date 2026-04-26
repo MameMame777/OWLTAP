@@ -197,7 +197,7 @@ bool DaemonProcessController::start(const std::string& exe_path,
     SetHandleInformation(stderr_rd, HANDLE_FLAG_INHERIT, 0);
 
     // Step 3: build command line and start process.
-    std::string cmdline = "\"" + exe_path + "\" --no-gui-port"
+    std::string cmdline = "\"" + exe_path + "\" --gui-port 0"
                           " --config \"" + config_path + "\""
                           " --mcp-port " + std::to_string(mcp_port);
 
@@ -263,7 +263,7 @@ bool DaemonProcessController::start(const std::string& exe_path,
         close(err_fds[0]); close(err_fds[1]);
         const std::string port_str = std::to_string(mcp_port);
         execl(exe_path.c_str(), exe_path.c_str(),
-              "--no-gui-port",
+              "--gui-port", "0",
               "--config", config_path.c_str(),
               "--mcp-port", port_str.c_str(),
               nullptr);

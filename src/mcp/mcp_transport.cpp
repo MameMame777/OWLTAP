@@ -118,6 +118,7 @@ struct TcpTransport::Impl {
     uint16_t port;
     ReceiveHandler handler;
     std::atomic<bool> stop_flag{false};
+    std::atomic<int> completed_connections{0};
     socket_t server_sock{kInvalidSocket};
     socket_t client_sock{kInvalidSocket};
     std::thread accept_thread;
@@ -222,6 +223,7 @@ void TcpTransport::start() {
                 closeSocket(impl_->client_sock);
                 impl_->client_sock = kInvalidSocket;
             }
+            impl_->completed_connections.fetch_add(1, std::memory_order_release);
         }
     });
 }
@@ -264,6 +266,10 @@ uint16_t TcpTransport::port() const { return impl_->port; }
 
 bool TcpTransport::isListening() const {
     return impl_->server_sock != kInvalidSocket;
+}
+
+int TcpTransport::completedConnections() const {
+    return impl_->completed_connections.load(std::memory_order_acquire);
 }
 
 }  // namespace jtag::mcp

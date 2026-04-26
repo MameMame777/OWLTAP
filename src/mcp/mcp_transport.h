@@ -69,6 +69,10 @@ public:
     // True after start() successfully binds and listens.
     bool isListening() const;
 
+    // Number of client sessions that have fully completed (connected then closed).
+    // Useful for --exit-on-disconnect logic in callers.
+    int completedConnections() const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

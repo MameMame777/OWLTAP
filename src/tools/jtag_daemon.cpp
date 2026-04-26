@@ -1,10 +1,11 @@
 /// jtag_daemon - Local daemon that owns OwlTAP hardware access.
 ///
-/// Phase 1A exposes the existing MCP tool set over TCP loopback while owning
-/// the single HardwareExecutor instance. GUI RPC is intentionally deferred.
+/// Phase 1B: lifecycle hardening — Windows console control, exit-on-disconnect
+/// option, graceful shutdown on all termination paths.
 ///
 /// Usage:
 ///   jtag_daemon [--mcp-port <port>] [--config <path>] [--no-gui-port]
+///               [--exit-on-disconnect]
 
 #include <atomic>
 #include <chrono>
@@ -15,6 +16,21 @@
 #include <memory>
 #include <string>
 #include <thread>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+// Windows SDK defines IN and OUT as empty SAL annotation macros.
+// Undefine them to avoid corrupting project enum values like PinDirection::IN.
+#ifdef IN
+#undef IN
+#endif
+#ifdef OUT
+#undef OUT
+#endif
+#endif
 
 #include <nlohmann/json.hpp>
 
@@ -33,6 +49,27 @@ void signalHandler(int /*signal*/) {
     g_stop_requested.store(true, std::memory_order_release);
 }
 
+#ifdef _WIN32
+// Windows console control events that SIGINT does not cover:
+// CTRL_CLOSE_EVENT  — user closes the console window
+// CTRL_LOGOFF_EVENT — interactive logoff
+// CTRL_SHUTDOWN_EVENT — system shutdown
+// The handler must return quickly; the OS kills the process after ~5 s.
+BOOL WINAPI consoleCtrlHandler(DWORD ctrl_type) {
+    switch (ctrl_type) {
+    case CTRL_C_EVENT:
+    case CTRL_BREAK_EVENT:
+    case CTRL_CLOSE_EVENT:
+    case CTRL_LOGOFF_EVENT:
+    case CTRL_SHUTDOWN_EVENT:
+        g_stop_requested.store(true, std::memory_order_release);
+        return TRUE;  // suppress default handler
+    default:
+        return FALSE;
+    }
+}
+#endif
+
 void printEvent(const nlohmann::json& event) {
     const std::string line = event.dump();
     std::printf("%s\n", line.c_str());
@@ -45,12 +82,14 @@ void printErrorEvent(const std::string& message) {
 
 void printUsage() {
     std::printf(
-        "Usage: jtag_daemon [--mcp-port <port>] [--config <path>] [--no-gui-port]\n"
-        "  --mcp-port <p>  MCP TCP port on 127.0.0.1 (default 9999, 0 = OS chosen).\n"
-        "  --config <p>    cfg.json path (default: cfg.json).\n"
-        "  --no-gui-port   Disable GUI RPC endpoint (required in Phase 1A).\n"
+        "Usage: jtag_daemon [--mcp-port <port>] [--config <path>]\n"
+        "                   [--no-gui-port] [--exit-on-disconnect]\n"
+        "  --mcp-port <p>       MCP TCP port on 127.0.0.1 (default 9999, 0 = OS chosen).\n"
+        "  --config <p>         cfg.json path (default: cfg.json).\n"
+        "  --no-gui-port        Disable GUI RPC endpoint (not yet implemented).\n"
+        "  --exit-on-disconnect Exit when the last MCP client disconnects.\n"
         "\n"
-        "GUI RPC endpoint options are reserved for a later phase.\n");
+        "GUI RPC endpoint is reserved for a later phase.\n");
 }
 
 bool parsePort(const char* text, uint16_t& out_port) {
@@ -68,6 +107,7 @@ bool parsePort(const char* text, uint16_t& out_port) {
 int main(int argc, char* argv[]) {
     uint16_t mcp_port = 9999;
     std::string config_path = "cfg.json";
+    bool exit_on_disconnect = false;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--mcp-port") == 0 && i + 1 < argc) {
@@ -78,9 +118,11 @@ int main(int argc, char* argv[]) {
         } else if (std::strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
             config_path = argv[++i];
         } else if (std::strcmp(argv[i], "--no-gui-port") == 0) {
-            // accepted and ignored in Phase 1A (GUI RPC not implemented)
+            // accepted and ignored (GUI RPC not yet implemented)
+        } else if (std::strcmp(argv[i], "--exit-on-disconnect") == 0) {
+            exit_on_disconnect = true;
         } else if (std::strcmp(argv[i], "--gui-port") == 0) {
-            printErrorEvent("GUI RPC endpoint is not implemented in Phase 1A; use --no-gui-port");
+            printErrorEvent("GUI RPC endpoint is not yet implemented; use --no-gui-port");
             return 1;
         } else if (std::strcmp(argv[i], "--help") == 0 ||
                    std::strcmp(argv[i], "-h") == 0) {
@@ -94,6 +136,9 @@ int main(int argc, char* argv[]) {
 
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
+#ifdef _WIN32
+    SetConsoleCtrlHandler(consoleCtrlHandler, TRUE);
+#endif
 
     const auto cfg = jtag::gui::AppConfig::load(config_path);
     std::fprintf(stderr,
@@ -137,6 +182,11 @@ int main(int argc, char* argv[]) {
 
     while (mcp_server.isRunning() &&
            !g_stop_requested.load(std::memory_order_acquire)) {
+        if (exit_on_disconnect &&
+            mcp_transport_ptr->completedConnections() > 0) {
+            std::fprintf(stderr, "[jtag_daemon] Client disconnected; exiting.\n");
+            break;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 

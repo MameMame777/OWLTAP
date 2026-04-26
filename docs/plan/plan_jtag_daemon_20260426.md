@@ -178,8 +178,8 @@ Track implementation with this status table. Update it whenever a phase starts, 
 
 | Phase | Status | Exit Criteria |
 |-------|--------|---------------|
-| 1A MCP-only daemon binary | In progress | `//src/tools:jtag_daemon` builds and serves MCP TCP with existing tools |
-| 1B daemon lifecycle hardening | Not started | ready/error stdout events, graceful shutdown, clear exit codes |
+| 1A MCP-only daemon binary | Done | `//src/tools:jtag_daemon` builds and serves MCP TCP with existing tools |
+| 1B daemon lifecycle hardening | Done | Windows console control, `--exit-on-disconnect`, `completedConnections()` counter, all 20 tests pass |
 | 2 GUI process controller | Not started | GUI can spawn/stop daemon and show daemon logs/status |
 | 3 GUI RPC minimal flow | Not started | GUI can detect devices, load BSDL, list pins through daemon |
 | 4 Capture and ILA migration | Not started | waveform capture and ILA status operate through daemon |

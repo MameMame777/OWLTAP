@@ -50,3 +50,4 @@ hdl/ila/examples/*/program_board.log
 # Simulation run logs
 hdl/ila/sim/exec/*_regression.log
 hdl/ila/sim/scripts/regress_temp.log
+HWsample/

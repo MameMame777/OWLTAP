@@ -125,6 +125,21 @@ nlohmann::json ToolRegistry::callTool(const std::string& name,
     });
 }
 
+nlohmann::json ToolRegistry::callToolRaw(const std::string& name,
+                                          const nlohmann::json& params) const {
+    const auto it = index_.find(name);
+    if (it == index_.end()) {
+        throw std::runtime_error("unknown tool: " + name);
+    }
+    const ToolSpec& spec = tools_[it->second];
+    const nlohmann::json effective_params =
+        params.is_null() ? nlohmann::json::object() : params;
+    if (auto err = validateParams(spec.input_schema, effective_params)) {
+        throw std::invalid_argument(*err);
+    }
+    return spec.handler(effective_params);
+}
+
 bool ToolRegistry::hasTool(const std::string& name) const {
     return index_.count(name) > 0;
 }

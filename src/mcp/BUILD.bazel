@@ -52,6 +52,19 @@ cc_library(
     ],
 )
 
+# Minimal JSON-RPC 2.0 server for the GUI endpoint (no MCP envelope).
+cc_library(
+    name = "gui_rpc_server",
+    srcs = ["gui_rpc_server.cpp"],
+    hdrs = ["gui_rpc_server.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":json_rpc",
+        ":mcp_transport",
+        "@nlohmann_json//:json",
+    ],
+)
+
 # Job tracking table (MCP-side strong references to HardwareJob).
 cc_library(
     name = "job_table",

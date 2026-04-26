@@ -1,11 +1,11 @@
 /// jtag_daemon - Local daemon that owns OwlTAP hardware access.
 ///
-/// Phase 1B: lifecycle hardening — Windows console control, exit-on-disconnect
-/// option, graceful shutdown on all termination paths.
+/// Phase 3: GUI RPC minimal flow — second TCP endpoint for the GUI process
+/// to detect devices, load BSDL, and list pins through the daemon.
 ///
 /// Usage:
-///   jtag_daemon [--mcp-port <port>] [--config <path>] [--no-gui-port]
-///               [--exit-on-disconnect]
+///   jtag_daemon [--mcp-port <port>] [--gui-port <port>] [--config <path>]
+///               [--no-gui-port] [--exit-on-disconnect]
 
 #include <atomic>
 #include <chrono>
@@ -37,6 +37,7 @@
 #include "src/gui/app_config.h"
 #include "src/hardware/hardware_executor.h"
 #include "src/mcp/executor_bridge.h"
+#include "src/mcp/gui_rpc_server.h"
 #include "src/mcp/mcp_server.h"
 #include "src/mcp/mcp_transport.h"
 #include "src/mcp/tools/register_tools.h"
@@ -82,14 +83,14 @@ void printErrorEvent(const std::string& message) {
 
 void printUsage() {
     std::printf(
-        "Usage: jtag_daemon [--mcp-port <port>] [--config <path>]\n"
-        "                   [--no-gui-port] [--exit-on-disconnect]\n"
+        "Usage: jtag_daemon [--mcp-port <port>] [--gui-port <port>]\n"
+        "                   [--config <path>] [--no-gui-port]\n"
+        "                   [--exit-on-disconnect]\n"
         "  --mcp-port <p>       MCP TCP port on 127.0.0.1 (default 9999, 0 = OS chosen).\n"
+        "  --gui-port <p>       GUI RPC TCP port (default 0 = OS chosen).\n"
+        "  --no-gui-port        Disable GUI RPC endpoint entirely.\n"
         "  --config <p>         cfg.json path (default: cfg.json).\n"
-        "  --no-gui-port        Disable GUI RPC endpoint (not yet implemented).\n"
-        "  --exit-on-disconnect Exit when the last MCP client disconnects.\n"
-        "\n"
-        "GUI RPC endpoint is reserved for a later phase.\n");
+        "  --exit-on-disconnect Exit when the last MCP client disconnects.\n");
 }
 
 bool parsePort(const char* text, uint16_t& out_port) {
@@ -106,6 +107,8 @@ bool parsePort(const char* text, uint16_t& out_port) {
 
 int main(int argc, char* argv[]) {
     uint16_t mcp_port = 9999;
+    uint16_t gui_port = 0;      // 0 = OS-chosen ephemeral port
+    bool     gui_rpc  = true;   // disabled by --no-gui-port
     std::string config_path = "cfg.json";
     bool exit_on_disconnect = false;
 
@@ -115,15 +118,17 @@ int main(int argc, char* argv[]) {
                 printErrorEvent(std::string("invalid MCP port: ") + argv[i]);
                 return 1;
             }
+        } else if (std::strcmp(argv[i], "--gui-port") == 0 && i + 1 < argc) {
+            if (!parsePort(argv[++i], gui_port)) {
+                printErrorEvent(std::string("invalid GUI port: ") + argv[i]);
+                return 1;
+            }
+        } else if (std::strcmp(argv[i], "--no-gui-port") == 0) {
+            gui_rpc = false;
         } else if (std::strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
             config_path = argv[++i];
-        } else if (std::strcmp(argv[i], "--no-gui-port") == 0) {
-            // accepted and ignored (GUI RPC not yet implemented)
         } else if (std::strcmp(argv[i], "--exit-on-disconnect") == 0) {
             exit_on_disconnect = true;
-        } else if (std::strcmp(argv[i], "--gui-port") == 0) {
-            printErrorEvent("GUI RPC endpoint is not yet implemented; use --no-gui-port");
-            return 1;
         } else if (std::strcmp(argv[i], "--help") == 0 ||
                    std::strcmp(argv[i], "-h") == 0) {
             printUsage();
@@ -172,10 +177,62 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    printEvent({{"event", "ready"},
-                {"mcp_port", mcp_transport_ptr->port()},
-                {"gui_port", nullptr},
-                {"gui_rpc", false}});
+    // -----------------------------------------------------------------------
+    // GUI RPC server (Phase 3)
+    // -----------------------------------------------------------------------
+    std::unique_ptr<jtag::mcp::GuiRpcServer> gui_server;
+    if (gui_rpc) {
+        gui_server = std::make_unique<jtag::mcp::GuiRpcServer>(gui_port);
+
+        // daemon/status — no hardware access needed.
+        gui_server->registerMethod("daemon/status",
+            [](const nlohmann::json&) -> nlohmann::json {
+                return nlohmann::json{
+                    {"version", "0.1.0"},
+                    {"status",  "running"}
+                };
+            });
+
+        // Delegate hardware methods to registered MCP tool handlers.
+        // callToolRaw() skips the MCP content-array wrapper.
+        auto& mcp_reg = mcp_server.registry();
+        gui_server->registerMethod("hardware/detect_devices",
+            [&mcp_reg](const nlohmann::json& p) {
+                return mcp_reg.callToolRaw("detect_devices", p);
+            });
+        gui_server->registerMethod("hardware/load_bsdl",
+            [&mcp_reg](const nlohmann::json& p) {
+                return mcp_reg.callToolRaw("load_bsdl", p);
+            });
+        gui_server->registerMethod("hardware/list_pins",
+            [&mcp_reg](const nlohmann::json& p) {
+                return mcp_reg.callToolRaw("list_pins", p);
+            });
+        gui_server->registerMethod("hardware/read_pin",
+            [&mcp_reg](const nlohmann::json& p) {
+                return mcp_reg.callToolRaw("read_pin", p);
+            });
+
+        gui_server->start();
+
+        if (!gui_server->isListening()) {
+            printErrorEvent("failed to listen on GUI RPC TCP port");
+            mcp_server.stop();
+            executor.shutdown();
+            return 1;
+        }
+        std::fprintf(stderr,
+                     "[jtag_daemon] GUI RPC listening on 127.0.0.1:%u\n",
+                     gui_server->port());
+    }
+
+    printEvent({{
+        "event",    "ready"},
+        {"mcp_port", mcp_transport_ptr->port()},
+        {"gui_port", gui_server ? nlohmann::json(gui_server->port())
+                                : nlohmann::json(nullptr)},
+        {"gui_rpc",  gui_rpc}
+    });
     std::fprintf(stderr,
                  "[jtag_daemon] MCP listening on 127.0.0.1:%u\n",
                  mcp_transport_ptr->port());
@@ -190,6 +247,7 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
+    if (gui_server) gui_server->stop();
     mcp_server.stop();
     executor.shutdown();
     printEvent({{"event", "stopped"}});

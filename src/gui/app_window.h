@@ -10,6 +10,7 @@
 
 #include "app_config.h"
 #include "daemon_process_controller.h"
+#include "gui_daemon_client.h"
 #include "ila_panel.h"
 #include "src/boundary_scan/pin_driver.h"
 #include "src/boundary_scan/scanner.h"
@@ -85,6 +86,7 @@ private:
     // Daemon process controller actions
     void onDaemonStart();
     void onDaemonStop();
+    void onDaemonConnect();   // Phase 3: connect GUI client to daemon GUI RPC port
     void drainDaemonLog();
 
     // PL programming (background thread)
@@ -173,6 +175,14 @@ private:
 
     // Daemon process controller (optional; created on connect)
     std::unique_ptr<DaemonProcessController> daemon_ctrl_;
+    std::unique_ptr<GuiDaemonClient>         gui_client_;
+    uint16_t                                 daemon_last_reported_port_{0};
+
+    // Daemon connect-via-RPC background operation (Phase 3)
+    std::atomic<bool> daemon_connect_running_{false};
+    std::mutex        daemon_connect_mutex_;
+    std::string       daemon_connect_result_;  // set by bg thread, cleared on drain
+    std::thread       daemon_connect_thread_;
 
     // MCP server (optional; created on-demand)
     enum class McpMode { kOff, kStdio, kTcp };

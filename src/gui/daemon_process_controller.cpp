@@ -57,10 +57,11 @@ struct DaemonProcessController::Impl {
         pending_log.push_back(msg);
     }
 
-    void setReady(uint16_t port) {
+    void setReady(uint16_t mcp_p, uint16_t gui_p) {
         std::lock_guard<std::mutex> lk(mu);
         status.state    = DaemonState::kRunning;
-        status.mcp_port = port;
+        status.mcp_port = mcp_p;
+        status.gui_port = gui_p;
     }
 
     void setError(const std::string& msg) {
@@ -372,8 +373,9 @@ void DaemonProcessController::readerThreadFn() {
             if (!j.contains("event")) continue;
             const std::string evt = j.at("event").get<std::string>();
             if (evt == "ready") {
-                const uint16_t port = j.value("mcp_port", uint16_t(0));
-                impl_->setReady(port);
+                const uint16_t mcp_p = j.value("mcp_port", uint16_t(0));
+                const uint16_t gui_p = j.value("gui_port", uint16_t(0));
+                impl_->setReady(mcp_p, gui_p);
             } else if (evt == "error") {
                 impl_->setError(j.value("message", "daemon error"));
             } else if (evt == "stopped") {

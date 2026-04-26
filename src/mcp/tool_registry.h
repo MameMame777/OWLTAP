@@ -39,6 +39,11 @@ public:
     nlohmann::json callTool(const std::string& name,
                              const nlohmann::json& params) const;
 
+    // Invoke a tool and return the raw handler result (no MCP content wrapper).
+    // Throws std::runtime_error on schema validation failure or unknown tool.
+    nlohmann::json callToolRaw(const std::string& name,
+                                const nlohmann::json& params) const;
+
     bool hasTool(const std::string& name) const;
     size_t size() const { return tools_.size(); }
 

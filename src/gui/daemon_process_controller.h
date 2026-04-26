@@ -18,6 +18,7 @@ enum class DaemonState {
 struct DaemonStatus {
     DaemonState state         = DaemonState::kOff;
     uint16_t    mcp_port      = 0;
+    uint16_t    gui_port      = 0;  ///< 0 if GUI RPC not enabled or not yet known.
     std::string error_message;
 };
 

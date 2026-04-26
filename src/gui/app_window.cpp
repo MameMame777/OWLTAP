@@ -263,6 +263,7 @@ AppWindow::AppWindow() {
     if (!glfwInit()) return;
 
     daemon_ctrl_ = std::make_unique<DaemonProcessController>();
+    gui_client_  = std::make_unique<GuiDaemonClient>();
 
     // Load saved config
     config_ = AppConfig::load("cfg.json");
@@ -1978,6 +1979,13 @@ void AppWindow::buildMenuBar() {
                 if (ImGui::MenuItem("Stop Daemon", nullptr, false, daemon_active)) {
                     onDaemonStop();
                 }
+                // Phase 3: Connect GUI RPC client when daemon is running with gui_port.
+                const bool can_connect_rpc =
+                    (ds.state == DaemonState::kRunning && ds.gui_port != 0 &&
+                     !daemon_connect_running_.load(std::memory_order_relaxed));
+                if (ImGui::MenuItem("Connect (via Daemon)", nullptr, false, can_connect_rpc)) {
+                    onDaemonConnect();
+                }
                 ImGui::Separator();
                 // -- Existing in-process MCP section --
                 const bool running = (mcp_mode_ != McpMode::kOff);
@@ -2413,8 +2421,71 @@ void AppWindow::onDaemonStart() {
 
 void AppWindow::onDaemonStop() {
     if (daemon_ctrl_->status().state == DaemonState::kOff) return;
+    if (gui_client_->isConnected()) gui_client_->disconnect();
     daemon_ctrl_->stop();
+    daemon_last_reported_port_ = 0;
     setStatusMessage("Daemon stopped.");
+}
+
+void AppWindow::onDaemonConnect() {
+    const DaemonStatus ds = daemon_ctrl_->status();
+    if (ds.state != DaemonState::kRunning || ds.gui_port == 0) {
+        DebugLogPanel::append("[daemon] GUI RPC not available (daemon not running or gui_port=0)");
+        return;
+    }
+    if (daemon_connect_running_.load(std::memory_order_acquire)) {
+        DebugLogPanel::append("[daemon] Connect already in progress");
+        return;
+    }
+    if (gui_client_->isConnected()) gui_client_->disconnect();
+
+    const uint16_t gui_port = ds.gui_port;
+    daemon_connect_running_.store(true, std::memory_order_release);
+    setStatusMessage("Connecting to daemon GUI RPC...");
+
+    if (daemon_connect_thread_.joinable()) daemon_connect_thread_.join();
+
+    daemon_connect_thread_ = std::thread([this, gui_port]() {
+        std::string report;
+
+        // Connect.
+        const std::string conn_err = gui_client_->connect(gui_port);
+        if (!conn_err.empty()) {
+            report = "[daemon] GUI RPC connect failed: " + conn_err;
+            std::lock_guard<std::mutex> lk(daemon_connect_mutex_);
+            daemon_connect_result_ = std::move(report);
+            daemon_connect_running_.store(false, std::memory_order_release);
+            return;
+        }
+        report += "[daemon] GUI RPC connected to 127.0.0.1:" +
+                  std::to_string(gui_port) + "\n";
+
+        // detect_devices
+        try {
+            auto devs = gui_client_->detectDevices();
+            const int count = devs.value("device_count", 0);
+            report += "[daemon] detect_devices: " + std::to_string(count) +
+                      " device(s)\n";
+            if (devs.contains("devices") && devs["devices"].is_array()) {
+                for (const auto& d : devs["devices"]) {
+                    char buf[128];
+                    std::snprintf(buf, sizeof(buf),
+                                  "[daemon]   [%d] IDCODE=%s ir_len=%d bsdl=%s",
+                                  d.value("position", -1),
+                                  d.value("idcode", "?").c_str(),
+                                  d.value("ir_length", 0),
+                                  d.value("bsdl_loaded", false) ? "loaded" : "none");
+                    report += std::string(buf) + "\n";
+                }
+            }
+        } catch (const std::exception& e) {
+            report += std::string("[daemon] detect_devices error: ") + e.what() + "\n";
+        }
+
+        std::lock_guard<std::mutex> lk(daemon_connect_mutex_);
+        daemon_connect_result_ = std::move(report);
+        daemon_connect_running_.store(false, std::memory_order_release);
+    });
 }
 
 void AppWindow::drainDaemonLog() {
@@ -2426,14 +2497,27 @@ void AppWindow::drainDaemonLog() {
     // Update status bar when daemon becomes ready.
     const DaemonStatus ds = daemon_ctrl_->status();
     if (ds.state == DaemonState::kRunning && ds.mcp_port != 0) {
-        // Only flip the status message once; avoid overwriting user actions.
-        static uint16_t last_reported_port = 0;
-        if (last_reported_port != ds.mcp_port) {
-            last_reported_port = ds.mcp_port;
+        if (daemon_last_reported_port_ != ds.mcp_port) {
+            daemon_last_reported_port_ = ds.mcp_port;
             char buf[64];
             std::snprintf(buf, sizeof(buf),
                           "Daemon running on 127.0.0.1:%u", ds.mcp_port);
             setStatusMessage(buf);
+        }
+    }
+
+    // Drain result from background daemon-connect operation (Phase 3).
+    if (!daemon_connect_running_.load(std::memory_order_acquire)) {
+        std::string result;
+        {
+            std::lock_guard<std::mutex> lk(daemon_connect_mutex_);
+            result.swap(daemon_connect_result_);
+        }
+        if (!result.empty()) {
+            DebugLogPanel::append(result);
+            if (daemon_connect_thread_.joinable()) {
+                daemon_connect_thread_.join();
+            }
         }
     }
 }

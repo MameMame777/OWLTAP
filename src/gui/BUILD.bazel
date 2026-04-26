@@ -7,6 +7,22 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+# TCP JSON-RPC 2.0 client for the daemon GUI endpoint.
+cc_library(
+    name = "gui_daemon_client",
+    srcs = ["gui_daemon_client.cpp"],
+    hdrs = ["gui_daemon_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/mcp:json_rpc",
+        "@nlohmann_json//:json",
+    ],
+    linkopts = select({
+        "@platforms//os:windows": ["-DEFAULTLIB:ws2_32.lib"],
+        "//conditions:default": [],
+    }),
+)
+
 cc_library(
     name = "bus_definition",
     srcs = ["bus_definition.cpp"],
@@ -26,6 +42,7 @@ cc_library(
         "daemon_process_controller.cpp",
         "debug_log_panel.cpp",
         "device_dialog.cpp",
+        "gui_daemon_client.cpp",
         "gui_theme.cpp",
         "hex_panel.cpp",
         "ila_panel.cpp",
@@ -42,6 +59,7 @@ cc_library(
         "daemon_process_controller.h",
         "debug_log_panel.h",
         "device_dialog.h",
+        "gui_daemon_client.h",
         "gui_theme.h",
         "hex_panel.h",
         "ila_panel.h",
@@ -55,6 +73,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":app_config",
+        ":gui_daemon_client",
         "//src:icon_rgba",
         "//src/boundary_scan:interconnect_test",
         "//src/boundary_scan:pin_driver",

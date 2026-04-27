@@ -2205,13 +2205,14 @@ void AppWindow::buildMenuBar() {
                                 capture_engine_ != nullptr)) {
                 show_trigger_dialog_ = true;
             }
-            ImGui::EndMenu();
-        }
-        if (ImGui::BeginMenu("View")) {
+            ImGui::Separator();
             if (ImGui::MenuItem("Internal Logic Analyzer", nullptr,
                                 ila_panel_.isVisible())) {
                 ila_panel_.setVisible(!ila_panel_.isVisible());
             }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("View")) {
             if (ImGui::MenuItem("Protocol Analyzer", nullptr,
                                 ProtocolPanel::isVisible())) {
                 ProtocolPanel::setVisible(!ProtocolPanel::isVisible());
@@ -2262,11 +2263,6 @@ void AppWindow::buildMenuBar() {
             if (ImGui::MenuItem("Protocol Analyzer...", nullptr,
                                 ProtocolPanel::isVisible())) {
                 ProtocolPanel::setVisible(!ProtocolPanel::isVisible());
-            }
-            ImGui::Separator();
-            if (ImGui::MenuItem("Internal Logic Analyzer...", nullptr,
-                                ila_panel_.isVisible())) {
-                ila_panel_.setVisible(!ila_panel_.isVisible());
             }
             ImGui::EndMenu();
         }

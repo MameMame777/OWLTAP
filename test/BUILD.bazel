@@ -191,3 +191,21 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "test_suite_test",
+    srcs = ["test_suite_test.cpp"],
+    deps = [
+        "//src/script:test_suite",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "ict_parser_test",
+    srcs = ["ict_parser_test.cpp"],
+    deps = [
+        "//src/boundary_scan:interconnect_test",
+        "@googletest//:gtest_main",
+    ],
+)
+

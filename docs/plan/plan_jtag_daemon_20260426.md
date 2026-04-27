@@ -182,8 +182,8 @@ Track implementation with this status table. Update it whenever a phase starts, 
 | 1B daemon lifecycle hardening | Done | Windows console control, `--exit-on-disconnect`, `completedConnections()` counter, all 20 tests pass |
 | 2 GUI process controller | Done | `DaemonProcessController` spawns/stops daemon, reads ready event, logs to DebugLog; GUI "MCP Server" menu has Start/Stop Daemon items |
 | 3 GUI RPC minimal flow | Done | `GuiRpcServer` (daemon side) + `GuiDaemonClient` (GUI side); detect_devices/load_bsdl/list_pins/read_pin callable via GUI RPC; "Connect (via Daemon)" menu item; all 20 tests pass |
-| 4 Capture and ILA migration | Not started | waveform capture and ILA status operate through daemon |
-| 5 Remove GUI direct FTDI ownership | Not started | normal GUI mode has no direct `FtdiDevice` ownership |
+| 4 Capture and ILA migration | Done | waveform capture and ILA status operate through daemon |
+| 5 Remove GUI direct FTDI ownership | Done | normal GUI mode has no direct `FtdiDevice` ownership (daemon path) |
 | 6 stdio proxy and packaging | Not started | packaged binaries support GUI, daemon, and stdio-only MCP clients |
 
 Per-phase progress should include:

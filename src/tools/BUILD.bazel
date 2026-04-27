@@ -1,4 +1,30 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
+cc_library(
+    name = "daemon_runner",
+    srcs = ["daemon_runner.cpp"],
+    hdrs = ["daemon_runner.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/boundary_scan:scanner",
+        "//src/gui:app_config",
+        "//src/hardware:hardware_executor",
+        "//src/hardware:hardware_context",
+        "//src/ila:bscane_ila_tap_backend",
+        "//src/ila:ila_driver",
+        "//src/mcp:executor_bridge",
+        "//src/mcp:gui_rpc_server",
+        "//src/mcp:mcp_server",
+        "//src/mcp:mcp_transport",
+        "//src/mcp:tool_registry",
+        "//src/mcp/tools:register_tools",
+        "@nlohmann_json//:json",
+    ],
+    linkopts = select({
+        "@platforms//os:windows": ["-DEFAULTLIB:ws2_32.lib"],
+        "//conditions:default": [],
+    }),
+)
 
 cc_binary(
     name = "jtag_diag",
@@ -57,15 +83,7 @@ cc_binary(
     name = "jtag_daemon",
     srcs = ["jtag_daemon.cpp"],
     deps = [
-        "//src/gui:app_config",
-        "//src/hardware:hardware_executor",
-        "//src/mcp:executor_bridge",
-        "//src/mcp:gui_rpc_server",
-        "//src/mcp:mcp_server",
-        "//src/mcp:mcp_transport",
-        "//src/mcp:tool_registry",
-        "//src/mcp/tools:register_tools",
-        "@nlohmann_json//:json",
+        ":daemon_runner",
     ],
     linkopts = select({
         "@platforms//os:windows": ["-DEFAULTLIB:ws2_32.lib"],

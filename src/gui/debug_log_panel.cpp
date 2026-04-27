@@ -24,8 +24,6 @@ bool scroll_to_bottom_ = false;
 void DebugLogPanel::draw(const std::string& latest_status) {
     ImGui::Begin("Debug Log");
 
-    ImGui::TextDisabled("Latest: %s", latest_status.c_str());
-    ImGui::SameLine();
     if (entries_.empty()) {
         ImGui::BeginDisabled();
     }
@@ -37,6 +35,8 @@ void DebugLogPanel::draw(const std::string& latest_status) {
     }
     ImGui::SameLine();
     ImGui::Checkbox("Auto Scroll", &auto_scroll_);
+    ImGui::SameLine();
+    ImGui::TextDisabled("| %s", latest_status.c_str());
     ImGui::Separator();
 
     const ImVec2 avail = ImGui::GetContentRegionAvail();

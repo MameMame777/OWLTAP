@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -70,6 +71,10 @@ public:
     /// @return ScanResult with decoded pin states
     ScanResult sample();
 
+    /// Set pin decode filter: only these names will be stored in ScanResult::pin_states.
+    /// Pass empty vector to disable filtering (decode all pins, the default).
+    void setDecodeFilter(const std::vector<std::string>& names);
+
     /// Get list of all observable (input) pin names.
     std::vector<std::string> getObservablePins() const;
 
@@ -85,6 +90,7 @@ public:
 private:
     JtagChain& chain_;
     int device_index_;
+    std::set<std::string> decode_filter_;  // empty = decode all pins
     std::string last_error_;
 };
 

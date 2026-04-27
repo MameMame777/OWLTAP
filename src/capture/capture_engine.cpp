@@ -41,6 +41,7 @@ bool CaptureEngine::start() {
         buffer_.resize(buffer_depth_);
         write_pos_ = 0;
         count_ = 0;
+        total_written_.store(0, std::memory_order_relaxed);
         trigger_sample_index_ = -1;
     }
 

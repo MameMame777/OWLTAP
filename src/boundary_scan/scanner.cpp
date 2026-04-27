@@ -142,7 +142,24 @@ ScanResult Scanner::sample() {
         return result;
     }
 
-    return decodeBoundaryScan(*dev, std::move(result.raw_bsr));
+    auto scan = decodeBoundaryScan(*dev, std::move(result.raw_bsr));
+
+    // Filter pin_states to only requested pins (reduces per-sample memory).
+    if (!decode_filter_.empty()) {
+        std::map<std::string, PinState> filtered;
+        for (const auto& name : decode_filter_) {
+            auto it = scan.pin_states.find(name);
+            if (it != scan.pin_states.end()) filtered.emplace(*it);
+        }
+        scan.pin_states = std::move(filtered);
+    }
+
+    return scan;
+}
+
+void Scanner::setDecodeFilter(const std::vector<std::string>& names) {
+    decode_filter_.clear();
+    decode_filter_.insert(names.begin(), names.end());
 }
 
 std::vector<std::string> Scanner::getObservablePins() const {

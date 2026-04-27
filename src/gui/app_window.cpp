@@ -1323,6 +1323,10 @@ void AppWindow::onStartCapture() {
         capture_engine_->stop();
     capture_engine_->setBufferDepth(static_cast<size_t>(capture_buffer_depth_));
     capture_engine_->trigger().setMode(run_mode_);
+    // Apply pin filter: only decode selected pins to reduce per-sample overhead.
+    if (scanner_) {
+        scanner_->setDecodeFilter(SignalPanel::selectedSignals());
+    }
     if (capture_engine_->start()) {
         capturing_ = true;
         extest_outputs_active_ = false;
@@ -1392,6 +1396,9 @@ void AppWindow::onSingleCapture() {
         capture_engine_->stop();
     capture_engine_->setBufferDepth(static_cast<size_t>(capture_buffer_depth_));
     capture_engine_->trigger().setMode(jtag::TriggerMode::SINGLE);
+    if (scanner_) {
+        scanner_->setDecodeFilter(SignalPanel::selectedSignals());
+    }
     if (capture_engine_->start()) {
         capturing_ = true;
         extest_outputs_active_ = false;

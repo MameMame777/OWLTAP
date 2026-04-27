@@ -57,6 +57,21 @@ struct AppConfig {
     std::vector<IlaSignalConfig> ila_signals;
     bool ila_or_mode = false;  ///< Trigger OR mode (false = AND)
 
+    // ILA generator wizard defaults
+    std::string ila_generator_output_subdir = "hdl/ila/generated/ila_generated";
+    std::string ila_generator_project_name = "ila_generated";
+    std::string ila_generator_top_module = "ila_generated_top";
+    std::string ila_generator_fpga_part = "xc7z020clg400-1";
+    std::string ila_generator_clock_port_name = "sample_clk";
+    std::string ila_generator_reset_port_name = "sample_rst_n";
+    std::string ila_generator_data_port_name = "data_in";
+    std::string ila_generator_valid_port_name = "data_valid";
+    uint32_t ila_generator_sample_clock_hz = 125000000;
+    int ila_generator_data_width = 32;
+    int ila_generator_depth = 1024;
+    uint32_t ila_generator_idcode = 0xA17A0001u;
+    std::vector<IlaSignalConfig> ila_generator_lanes;
+
     // XDC pin alias file (optional)
     std::string xdc_path;
 

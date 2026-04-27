@@ -266,6 +266,49 @@ bool AppConfig::save(const std::string& path) const {
     if (!ila_signals.empty()) f << "  ";
     f << "],\n";
 
+        // ILA generator defaults
+        f << "  \"ila_generator_output_subdir\": \""
+            << jsonEscape(ila_generator_output_subdir) << "\",\n";
+        f << "  \"ila_generator_project_name\": \""
+            << jsonEscape(ila_generator_project_name) << "\",\n";
+        f << "  \"ila_generator_top_module\": \""
+            << jsonEscape(ila_generator_top_module) << "\",\n";
+        f << "  \"ila_generator_fpga_part\": \""
+            << jsonEscape(ila_generator_fpga_part) << "\",\n";
+        f << "  \"ila_generator_clock_port_name\": \""
+            << jsonEscape(ila_generator_clock_port_name) << "\",\n";
+        f << "  \"ila_generator_reset_port_name\": \""
+            << jsonEscape(ila_generator_reset_port_name) << "\",\n";
+        f << "  \"ila_generator_data_port_name\": \""
+            << jsonEscape(ila_generator_data_port_name) << "\",\n";
+        f << "  \"ila_generator_valid_port_name\": \""
+            << jsonEscape(ila_generator_valid_port_name) << "\",\n";
+        f << "  \"ila_generator_sample_clock_hz\": " << ila_generator_sample_clock_hz << ",\n";
+        f << "  \"ila_generator_data_width\": " << ila_generator_data_width << ",\n";
+        f << "  \"ila_generator_depth\": " << ila_generator_depth << ",\n";
+        f << "  \"ila_generator_idcode\": " << ila_generator_idcode << ",\n";
+
+        f << "  \"ila_generator_lanes\": [";
+        for (size_t i = 0; i < ila_generator_lanes.size(); i++) {
+                const auto& s = ila_generator_lanes[i];
+                if (i == 0) f << "\n";
+                const char* fmt_str =
+                        (s.fmt == BusFormat::DEC) ? "DEC" :
+                        (s.fmt == BusFormat::BIN) ? "BIN" : "HEX";
+                f << "    {\"name\":\"" << jsonEscape(s.name) << "\"," 
+                    << "\"hi\":" << s.hi << ","
+                    << "\"lo\":" << s.lo << ","
+                    << "\"fmt\":\"" << fmt_str << "\"," 
+                    << "\"trig_cond\":0,"
+                    << "\"trig_value\":0,"
+                    << "\"trig_cond_b\":0,"
+                    << "\"trig_value_b\":0}";
+                if (i + 1 < ila_generator_lanes.size()) f << ",";
+                f << "\n";
+        }
+        if (!ila_generator_lanes.empty()) f << "  ";
+        f << "],\n";
+
     // XDC pin alias file
     f << "  \"xdc_path\": \"" << jsonEscape(xdc_path) << "\",\n";
     f << "  \"ila_or_mode\": " << (ila_or_mode ? 1 : 0) << "\n";
@@ -292,6 +335,27 @@ AppConfig AppConfig::load(const std::string& path) {
     cfg.selected_pins     = jsonStringArray(json, "selected_pins");
     cfg.buses             = jsonBusArray(json, "buses");
     cfg.ila_signals       = jsonIlaSignalArray(json, "ila_signals");
+    cfg.ila_generator_output_subdir = jsonString(json, "ila_generator_output_subdir");
+    if (cfg.ila_generator_output_subdir.empty()) cfg.ila_generator_output_subdir = "hdl/ila/generated/ila_generated";
+    cfg.ila_generator_project_name = jsonString(json, "ila_generator_project_name");
+    if (cfg.ila_generator_project_name.empty()) cfg.ila_generator_project_name = "ila_generated";
+    cfg.ila_generator_top_module = jsonString(json, "ila_generator_top_module");
+    if (cfg.ila_generator_top_module.empty()) cfg.ila_generator_top_module = "ila_generated_top";
+    cfg.ila_generator_fpga_part = jsonString(json, "ila_generator_fpga_part");
+    if (cfg.ila_generator_fpga_part.empty()) cfg.ila_generator_fpga_part = "xc7z020clg400-1";
+    cfg.ila_generator_clock_port_name = jsonString(json, "ila_generator_clock_port_name");
+    if (cfg.ila_generator_clock_port_name.empty()) cfg.ila_generator_clock_port_name = "sample_clk";
+    cfg.ila_generator_reset_port_name = jsonString(json, "ila_generator_reset_port_name");
+    if (cfg.ila_generator_reset_port_name.empty()) cfg.ila_generator_reset_port_name = "sample_rst_n";
+    cfg.ila_generator_data_port_name = jsonString(json, "ila_generator_data_port_name");
+    if (cfg.ila_generator_data_port_name.empty()) cfg.ila_generator_data_port_name = "data_in";
+    cfg.ila_generator_valid_port_name = jsonString(json, "ila_generator_valid_port_name");
+    if (cfg.ila_generator_valid_port_name.empty()) cfg.ila_generator_valid_port_name = "data_valid";
+    cfg.ila_generator_sample_clock_hz = static_cast<uint32_t>(jsonInt(json, "ila_generator_sample_clock_hz", 125000000));
+    cfg.ila_generator_data_width = static_cast<int>(jsonInt(json, "ila_generator_data_width", 32));
+    cfg.ila_generator_depth = static_cast<int>(jsonInt(json, "ila_generator_depth", 1024));
+    cfg.ila_generator_idcode = static_cast<uint32_t>(jsonInt(json, "ila_generator_idcode", 0xA17A0001u));
+    cfg.ila_generator_lanes = jsonIlaSignalArray(json, "ila_generator_lanes");
     cfg.xdc_path          = jsonString(json, "xdc_path");
     cfg.ila_or_mode       = (jsonInt(json, "ila_or_mode", 0) != 0);
     return cfg;

@@ -32,6 +32,7 @@
 #include "device_dialog.h"
 #include "gui_theme.h"
 #include "hex_panel.h"
+#include "ila_generator_dialog.h"
 #include "ila_panel.h"
 #include "interconnect_panel.h"
 #include "protocol_panel.h"
@@ -485,6 +486,13 @@ void AppWindow::run() {
                     // Daemon mode: read mode from dialog directly
                     run_mode_ = TriggerDialog::selectedMode();
                 }
+            }
+        }
+        if (show_ila_generator_dialog_) {
+            IlaGeneratorDialog::draw(&show_ila_generator_dialog_, &config_);
+            std::string generator_status;
+            if (IlaGeneratorDialog::consumeStatusMessage(generator_status)) {
+                setStatusMessage(generator_status);
             }
         }
         // About
@@ -2385,6 +2393,10 @@ void AppWindow::buildMenuBar() {
                                    !program_flash_running_.load();
             if (ImGui::MenuItem("Program  Flash (SPI ROM)...", nullptr, false, can_flash)) {
                 onProgramFlash();
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Generate ILA Core...")) {
+                show_ila_generator_dialog_ = true;
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Protocol Analyzer...", nullptr,

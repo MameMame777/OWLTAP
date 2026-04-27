@@ -150,6 +150,15 @@ cc_test(
 )
 
 cc_test(
+    name = "ila_generator_test",
+    srcs = ["ila_generator_test.cpp"],
+    deps = [
+        "//src/ila:ila_generator",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "hardware_job_test",
     srcs = ["hardware_job_test.cpp"],
     deps = [

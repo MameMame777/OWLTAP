@@ -146,6 +146,20 @@ contents (version, depth, data width, signal count, armed / triggered /
 full flags); the GUI's ILA panel arms the core, polls status, and reads
 captured samples back into the waveform view.
 
+### ILA Generator Wizard
+
+The GUI also includes **Tools → Generate ILA Core...** for creating a ready-to-build
+`BSCANE2` ILA package from manual lane definitions.
+
+| Output | Detail |
+|--------|--------|
+| Wrapper RTL | Generates a top-level SystemVerilog wrapper that instantiates `ila_bscane2_top` |
+| Vivado helper scripts | Emits `create_project.tcl` and `build_bitstream.tcl` with repository-relative paths |
+| Constraints | Emits `ila_generated.xdc` with the sample clock constraint |
+| Package README | Summarises parameters, lane map, and Vivado batch usage |
+
+Current generator scope: `BSCANE2` only, manual lane configuration, `DATA_W = 1..32`, and power-of-two capture depth.
+
 > **Note:** the default `IDCODE_VAL = 32'hA17A_0001` is a development
 > placeholder.  Before distributing hardware, encode a proper
 > manufacturer-assigned 32-bit IDCODE or document the conflict in your
@@ -160,7 +174,6 @@ captured samples back into the waveform view.
 | [Bazelisk](https://github.com/bazelbuild/bazelisk/releases) | Download `bazelisk-windows-amd64.exe`, rename to `bazelisk.exe`, place on `PATH` |
 | Visual Studio 2022 | **Desktop development with C++** workload required (MSVC v143, Windows SDK) |
 | Python 3.x | Required by Bazel host scripts; `python` must be on `PATH` |
-| Pillow (optional) | `pip install pillow` — only needed for the icon-embedding post-build step |
 
 libftdi1 and libusb-1.0 are vendored under `third_party/`; no separate installation is needed for building.
 
@@ -178,23 +191,19 @@ git clone https://github.com/MameMame777/OwlTAP.git
 cd OwlTAP
 
 # Build the viewer
-bazelisk build //src:jtag_viewer
-
-# Embed the taskbar icon (requires Pillow; run once after each clean build)
-Set-ItemProperty bazel-bin/src/jtag_viewer.exe -Name IsReadOnly -Value $false
-python tools/embed_icon.py bazel-bin/src/jtag_viewer.exe docs/icon.png
+bazelisk build //src:owltap
 
 # Run all unit tests (no hardware required)
 bazelisk test //test/...
 
 # Build with debug symbols
-bazelisk build --config=debug //src:jtag_viewer
+bazelisk build --config=debug //src:owltap
 
 # Build the diagnostic CLI tool
 bazelisk build //src/tools:jtag_diag
 ```
 
-The binary is produced at `bazel-bin/src/jtag_viewer.exe`.
+The binary is produced at `bazel-bin/src/owltap.exe`.
 
 ### BSDL files
 
@@ -205,7 +214,7 @@ and load them at runtime via **Device → Load BSDL**.
 ## Usage
 
 1. Connect the FTDI adapter to the target board's JTAG header.
-2. Run `jtag_viewer.exe`.
+2. Run `owltap.exe`.
 3. **Device** → **Connect**: select VID/PID/serial and channel; click Connect.
 4. **Device** → **Load BSDL**: choose the `.bsd` / `.bsdl` file for your target.
 5. **Signal Panel**: select pins to monitor or drive.

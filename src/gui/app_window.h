@@ -102,6 +102,7 @@ private:
     GLFWwindow* window_ = nullptr;
     bool show_device_dialog_ = false;
     bool show_trigger_dialog_ = false;
+    bool show_ila_generator_dialog_ = false;
     bool show_about_ = false;
     bool show_help_ = false;
     int  help_topic_ = 0;

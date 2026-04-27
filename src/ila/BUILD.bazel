@@ -1,6 +1,13 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
 cc_library(
+    name = "ila_generator",
+    srcs = ["ila_generator.cpp"],
+    hdrs = ["ila_generator.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "ila_tap_backend",
     srcs = ["ila_tap_backend.cpp"],
     hdrs = ["ila_tap_backend.h"],

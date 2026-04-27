@@ -15,6 +15,11 @@ public:
     /// @param p_buffer_depth  Pointer to the caller's buffer depth value (editable in dialog).
     static void draw(bool* p_open, int* p_buffer_depth = nullptr);
 
+    /// Return the trigger mode selected in the dialog (valid after draw() returns with *p_open==false).
+    static jtag::TriggerMode selectedMode() {
+        return mode_idx_ == 1 ? jtag::TriggerMode::NORMAL : jtag::TriggerMode::FREE_RUN;
+    }
+
     /// Bind to a scanner and trigger engine. Must call before draw().
     static void bind(jtag::Scanner* scanner, jtag::TriggerEngine* trigger);
 

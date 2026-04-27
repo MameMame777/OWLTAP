@@ -34,11 +34,6 @@ void TriggerDialog::bind(jtag::Scanner* scanner,
 }
 
 void TriggerDialog::draw(bool* p_open, int* p_buffer_depth) {
-    if (!trigger_) {
-        *p_open = false;
-        return;
-    }
-
     if (!ImGui::IsPopupOpen("Trigger Configuration")) {
         ImGui::OpenPopup("Trigger Configuration");
     }
@@ -71,8 +66,9 @@ void TriggerDialog::draw(bool* p_open, int* p_buffer_depth) {
             }
         }
 
-        // Condition editor
-        if (ImGui::CollapsingHeader("Trigger Conditions (AND)",
+        // Condition editor (only available when a local capture engine is bound)
+        if (trigger_ &&
+            ImGui::CollapsingHeader("Trigger Conditions (AND)",
                                      ImGuiTreeNodeFlags_DefaultOpen)) {
             // Add condition row
             if (!pin_names_.empty()) {
@@ -148,10 +144,12 @@ void TriggerDialog::draw(bool* p_open, int* p_buffer_depth) {
 
         if (ImGui::Button("OK", ImVec2(120, 0))) {
             // Map dialog index back to TriggerMode (0=Free Run, 1=Normal)
-            trigger_->setMode(mode_idx_ == 1 ? jtag::TriggerMode::NORMAL
-                                              : jtag::TriggerMode::FREE_RUN);
-            trigger_->setPreTriggerRatio(pretrigger_);
-            trigger_->setConditions(conditions_);
+            if (trigger_) {
+                trigger_->setMode(mode_idx_ == 1 ? jtag::TriggerMode::NORMAL
+                                                 : jtag::TriggerMode::FREE_RUN);
+                trigger_->setPreTriggerRatio(pretrigger_);
+                trigger_->setConditions(conditions_);
+            }
             *p_open = false;
             ImGui::CloseCurrentPopup();
         }

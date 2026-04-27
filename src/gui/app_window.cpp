@@ -450,9 +450,14 @@ void AppWindow::run() {
         if (show_trigger_dialog_) {
             TriggerDialog::draw(&show_trigger_dialog_, &capture_buffer_depth_);
             // Sync run_mode_ when dialog closes (OK pressed)
-            if (!show_trigger_dialog_ && capture_engine_) {
-                auto m = capture_engine_->trigger().mode();
-                if (m != jtag::TriggerMode::SINGLE) run_mode_ = m;
+            if (!show_trigger_dialog_) {
+                if (capture_engine_) {
+                    auto m = capture_engine_->trigger().mode();
+                    if (m != jtag::TriggerMode::SINGLE) run_mode_ = m;
+                } else {
+                    // Daemon mode: read mode from dialog directly
+                    run_mode_ = TriggerDialog::selectedMode();
+                }
             }
         }
         // About
@@ -1500,13 +1505,12 @@ void AppWindow::refreshFromCapture() {
                                   cached_samples_.begin() +
                                   static_cast<ptrdiff_t>(cached_samples_.size() - depth));
         }
+        syncSelectionViews(cached_samples_);
+        if (pin_driver_ && !cached_samples_.back().data.raw_bsr.empty()) {
+            pin_driver_->loadSnapshot(cached_samples_.back().data.raw_bsr);
+        }
     }
     if (cached_samples_.empty()) return;
-
-    syncSelectionViews(cached_samples_);
-    if (pin_driver_ && !cached_samples_.back().data.raw_bsr.empty()) {
-        pin_driver_->loadSnapshot(cached_samples_.back().data.raw_bsr);
-    }
 
     // Check capture state
     auto state = capture_engine_->state();
@@ -2218,7 +2222,7 @@ void AppWindow::buildMenuBar() {
                 ImGui::Separator();
             }
             if (ImGui::MenuItem("Trigger Setup...", "F8", false,
-                                capture_engine_ != nullptr)) {
+                                (capture_engine_ != nullptr || daemon_cap) && !capturing_)) {
                 show_trigger_dialog_ = true;
             }
             ImGui::Separator();

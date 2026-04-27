@@ -197,9 +197,12 @@ bool DaemonProcessController::start(const std::string& exe_path,
     SetHandleInformation(stderr_rd, HANDLE_FLAG_INHERIT, 0);
 
     // Step 3: build command line and start process.
+    // When mcp_port == 0 the GUI has requested GUI-only mode; use --no-mcp-port
+    // so the daemon does not expose an MCP TCP endpoint.
     std::string cmdline = "\"" + exe_path + "\" --gui-port 0"
                           " --config \"" + config_path + "\""
-                          " --mcp-port " + std::to_string(mcp_port);
+                          + (mcp_port == 0 ? " --no-mcp-port"
+                                           : " --mcp-port " + std::to_string(mcp_port));
 
     STARTUPINFOA si{};
     si.cb          = sizeof(si);

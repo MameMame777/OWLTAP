@@ -83,9 +83,10 @@ void printErrorEvent(const std::string& message) {
 void printUsage() {
     std::printf(
         "Usage: [--mcp-port <port>] [--gui-port <port>]\n"
-        "       [--config <path>] [--no-gui-port]\n"
+        "       [--config <path>] [--no-gui-port] [--no-mcp-port]\n"
         "       [--exit-on-disconnect]\n"
         "  --mcp-port <p>       MCP TCP port on 127.0.0.1 (default 9999, 0 = OS chosen).\n"
+        "  --no-mcp-port        Disable MCP endpoint entirely (GUI-only mode).\n"
         "  --gui-port <p>       GUI RPC TCP port (default 0 = OS chosen).\n"
         "  --no-gui-port        Disable GUI RPC endpoint entirely.\n"
         "  --config <p>         cfg.json path (default: cfg.json).\n"
@@ -111,6 +112,7 @@ int runDaemon(int argc, char* argv[]) {
     uint16_t mcp_port = 9999;
     uint16_t gui_port = 0;      // 0 = OS-chosen ephemeral port
     bool     gui_rpc  = true;   // disabled by --no-gui-port
+    bool     mcp_rpc  = true;   // disabled by --no-mcp-port
     std::string config_path = "cfg.json";
     bool exit_on_disconnect = false;
 
@@ -126,6 +128,8 @@ int runDaemon(int argc, char* argv[]) {
                 printErrorEvent(std::string("invalid GUI port: ") + argv[i]);
                 return 1;
             }
+        } else if (std::strcmp(argv[i], "--no-mcp-port") == 0) {
+            mcp_rpc = false;
         } else if (std::strcmp(argv[i], "--no-gui-port") == 0) {
             gui_rpc = false;
         } else if (std::strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
@@ -162,20 +166,26 @@ int runDaemon(int argc, char* argv[]) {
     std::fprintf(stderr, "[jtag_daemon] Hardware executor running (lazy open, 30s idle-close).\n");
 
     jtag::mcp::ExecutorBridge bridge(executor);
+
+    // McpServer is always created because GUI-RPC delegates to its registry.
+    // The TCP transport is optional; skipped when --no-mcp-port is passed.
     jtag::mcp::McpServer mcp_server({"owltap-jtag-daemon", "0.1.0"});
     mcp_server.setExecutorBridge(&bridge);
     jtag::mcp::tools::registerHardwareTools(mcp_server.registry(), bridge);
 
-    auto mcp_transport = std::make_unique<jtag::mcp::TcpTransport>(mcp_port);
-    auto* mcp_transport_ptr = mcp_transport.get();
-    mcp_server.setTransport(std::move(mcp_transport));
-    mcp_server.start();
+    jtag::mcp::TcpTransport* mcp_transport_ptr = nullptr;
+    if (mcp_rpc) {
+        auto mcp_transport = std::make_unique<jtag::mcp::TcpTransport>(mcp_port);
+        mcp_transport_ptr  = mcp_transport.get();
+        mcp_server.setTransport(std::move(mcp_transport));
+        mcp_server.start();
 
-    if (!mcp_transport_ptr->isListening()) {
-        printErrorEvent("failed to listen on MCP TCP port");
-        mcp_server.stop();
-        executor.shutdown();
-        return 1;
+        if (!mcp_transport_ptr->isListening()) {
+            printErrorEvent("failed to listen on MCP TCP port");
+            mcp_server.stop();
+            executor.shutdown();
+            return 1;
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -492,18 +502,22 @@ int runDaemon(int argc, char* argv[]) {
 
     printEvent({{
         "event",    "ready"},
-        {"mcp_port", mcp_transport_ptr->port()},
+        {"mcp_port", mcp_transport_ptr ? mcp_transport_ptr->port() : uint16_t(0)},
         {"gui_port", gui_server ? nlohmann::json(gui_server->port())
                                 : nlohmann::json(nullptr)},
         {"gui_rpc",  gui_rpc}
     });
-    std::fprintf(stderr,
-                 "[jtag_daemon] MCP listening on 127.0.0.1:%u\n",
-                 mcp_transport_ptr->port());
+    if (mcp_transport_ptr) {
+        std::fprintf(stderr,
+                     "[jtag_daemon] MCP listening on 127.0.0.1:%u\n",
+                     mcp_transport_ptr->port());
+    } else {
+        std::fprintf(stderr, "[jtag_daemon] MCP disabled (--no-mcp-port).\n");
+    }
 
-    while (mcp_server.isRunning() &&
-           !g_stop_requested.load(std::memory_order_acquire)) {
-        if (exit_on_disconnect &&
+    while (!g_stop_requested.load(std::memory_order_acquire) &&
+           (!mcp_rpc || mcp_server.isRunning())) {
+        if (exit_on_disconnect && mcp_transport_ptr &&
             mcp_transport_ptr->completedConnections() > 0) {
             std::fprintf(stderr, "[jtag_daemon] Client disconnected; exiting.\n");
             break;

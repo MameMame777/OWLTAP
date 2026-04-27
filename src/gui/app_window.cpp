@@ -2225,7 +2225,7 @@ void AppWindow::buildMenuBar() {
                 reset_layout_requested_ = true;
             }
             ImGui::Separator();
-            if (ImGui::BeginMenu("MCP Server")) {
+            if (ImGui::BeginMenu("Daemon")) {
                 // -- Daemon section --
                 const DaemonStatus ds = daemon_ctrl_->status();
                 const char* state_label =
@@ -2235,19 +2235,16 @@ void AppWindow::buildMenuBar() {
                     ds.state == DaemonState::kStopping ? "Daemon: Stopping..." :
                                                          "Daemon: Error";
                 ImGui::TextDisabled("%s", state_label);
-                if (ds.state == DaemonState::kRunning && ds.mcp_port != 0) {
-                    ImGui::SameLine();
-                    ImGui::TextDisabled(":%u", ds.mcp_port);
-                }
                 if (!ds.error_message.empty()) {
                     ImGui::TextDisabled("  %s", ds.error_message.c_str());
                 }
+                ImGui::TextDisabled("MCP: use CLI --mcp-port <port>");
                 const bool daemon_off =
                     (ds.state == DaemonState::kOff || ds.state == DaemonState::kError);
                 const bool daemon_active =
                     (ds.state == DaemonState::kStarting ||
                      ds.state == DaemonState::kRunning);
-                if (ImGui::MenuItem("Start Daemon (port 0)", nullptr, false, daemon_off)) {
+                if (ImGui::MenuItem("Start Daemon", nullptr, false, daemon_off)) {
                     onDaemonStart();
                 }
                 if (ImGui::MenuItem("Stop Daemon", nullptr, false, daemon_active)) {

@@ -10,9 +10,9 @@
 </p>
 
 ---
-O:OpenSource\n
-W:Waveform\n
-L:Logger\n
+O:OpenSource
+W:Waveform
+L:Logger
 
 <p align="center">
   <img src="docs/GUI.png" alt="GUI panel" width="800"/><br/>

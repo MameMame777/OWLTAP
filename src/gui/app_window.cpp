@@ -1502,17 +1502,31 @@ void AppWindow::refreshFromCapture() {
 
     // Incremental fetch: only copy samples written since last refresh.
     // This avoids copying the entire ring buffer (O(N)) every 50 ms.
-    auto new_frames = capture_engine_->getNewSamples(capture_last_total_);
+    const auto new_frames = capture_engine_->getNewSamples(capture_last_total_);
     if (!new_frames.empty()) {
-        for (auto& f : new_frames) cached_samples_.push_back(std::move(f));
-        // Evict oldest entries when cache exceeds the configured buffer depth.
+        // Append new frames and evict oldest if over buffer depth.
+        cached_samples_.insert(cached_samples_.end(),
+                               new_frames.begin(), new_frames.end());
         const size_t depth = static_cast<size_t>(capture_buffer_depth_);
+        size_t evict_count = 0;
         if (cached_samples_.size() > depth) {
+            evict_count = cached_samples_.size() - depth;
             cached_samples_.erase(cached_samples_.begin(),
                                   cached_samples_.begin() +
-                                  static_cast<ptrdiff_t>(cached_samples_.size() - depth));
+                                  static_cast<ptrdiff_t>(evict_count));
         }
-        syncSelectionViews(cached_samples_);
+
+        // Incremental append: O(new_frames * signals) instead of O(all * signals).
+        // Falls back to full rebuild when signal/bus selection has changed.
+        const auto selected = SignalPanel::selectedSignals();
+        const auto& buses   = SignalPanel::buses();
+        if (!WaveformView::appendData(selected, buses, new_frames, evict_count)) {
+            syncSelectionViews(cached_samples_);  // selection changed: full rebuild
+        } else {
+            HexPanel::setBuses(buses);
+            HexPanel::updateValues(cached_samples_.back().data, selected);
+        }
+
         if (pin_driver_ && !cached_samples_.back().data.raw_bsr.empty()) {
             pin_driver_->loadSnapshot(cached_samples_.back().data.raw_bsr);
         }

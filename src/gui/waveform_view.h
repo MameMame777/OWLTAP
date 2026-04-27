@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -33,6 +34,14 @@ public:
     static void setData(const std::vector<std::string>& signals,
                         const std::vector<BusDefinition>& buses,
                         const std::vector<jtag::SampleFrame>& samples);
+
+    /// Incrementally append new frames to existing lanes.
+    /// Evicts @p evict_front_count oldest data points from the front of each lane.
+    /// @return false if signal/bus config changed; caller must call setData() instead.
+    static bool appendData(const std::vector<std::string>& signals,
+                           const std::vector<BusDefinition>& buses,
+                           const std::vector<jtag::SampleFrame>& new_frames,
+                           size_t evict_front_count);
 
     /// Clear displayed data.
     static void clearData();
@@ -86,6 +95,11 @@ private:
     static bool reset_view_requested_;
     static std::vector<jtag::protocol::DecodedFrame> annotations_;
     static jtag::xdc::PinAliasMap signal_aliases_;
+
+    // Incremental-append state
+    static std::chrono::steady_clock::time_point t0_;  // timestamp of first sample
+    static std::vector<std::string> lane_signals_;     // signals used to build current lanes
+    static std::vector<std::string> lane_bus_names_;   // bus names used to build current lanes
 };
 
 } // namespace jtag::gui

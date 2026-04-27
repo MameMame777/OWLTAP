@@ -25,6 +25,10 @@ bool WaveformView::reset_view_requested_ = false;
 std::vector<jtag::protocol::DecodedFrame> WaveformView::annotations_;
 jtag::xdc::PinAliasMap WaveformView::signal_aliases_;
 
+std::chrono::steady_clock::time_point WaveformView::t0_;
+std::vector<std::string> WaveformView::lane_signals_;
+std::vector<std::string> WaveformView::lane_bus_names_;
+
 void WaveformView::setData(const std::vector<std::string>& signals,
                             const std::vector<BusDefinition>& buses,
                             const std::vector<jtag::SampleFrame>& samples) {
@@ -115,6 +119,12 @@ void WaveformView::setData(const std::vector<std::string>& signals,
         earliest_time_ = lanes_[0].times.front();
         latest_time_ = lanes_[0].times.back();
     }
+
+    // Store incremental-append state.
+    t0_ = samples.front().timestamp;
+    lane_signals_ = signals;
+    lane_bus_names_.clear();
+    for (const auto& b : buses) lane_bus_names_.push_back(b.name);
 }
 
 void WaveformView::clearData() {
@@ -128,6 +138,84 @@ void WaveformView::clearData() {
     selected_signal_count_ = 0;
     fit_requested_ = false;
     reset_view_requested_ = false;
+    lane_signals_.clear();
+    lane_bus_names_.clear();
+}
+
+bool WaveformView::appendData(const std::vector<std::string>& signals,
+                               const std::vector<BusDefinition>& buses,
+                               const std::vector<jtag::SampleFrame>& new_frames,
+                               size_t evict_front_count) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Verify signal/bus config matches the current lanes.
+    if (signals != lane_signals_) return false;
+    if (buses.size() != lane_bus_names_.size()) return false;
+    for (size_t i = 0; i < buses.size(); i++) {
+        if (buses[i].name != lane_bus_names_[i]) return false;
+    }
+    // Lanes not yet initialised (e.g. first call before setData).
+    if (lanes_.empty() && (!signals.empty() || !buses.empty())) return false;
+
+    // Evict oldest data points from the front of each lane.
+    if (evict_front_count > 0) {
+        for (auto& lane : lanes_) {
+            const size_t n = std::min(evict_front_count, lane.times.size());
+            lane.times.erase(lane.times.begin(), lane.times.begin() + static_cast<ptrdiff_t>(n));
+            if (lane.kind == LaneKind::BINARY) {
+                lane.values.erase(lane.values.begin(),
+                                  lane.values.begin() + static_cast<ptrdiff_t>(n));
+            } else {
+                lane.bus_values.erase(lane.bus_values.begin(),
+                                      lane.bus_values.begin() + static_cast<ptrdiff_t>(n));
+            }
+        }
+        // Recalculate earliest_time_ after eviction.
+        if (!lanes_.empty() && !lanes_[0].times.empty()) {
+            earliest_time_ = lanes_[0].times.front();
+        }
+    }
+
+    if (new_frames.empty()) return true;
+
+    // Append new frames to each lane.
+    size_t lane_idx = 0;
+    for (const auto& sig : signals) {
+        auto& lane = lanes_[lane_idx++];
+        for (const auto& frame : new_frames) {
+            const double us = static_cast<double>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    frame.timestamp - t0_).count());
+            lane.times.push_back(us);
+            const jtag::PinState state = frame.data.getPin(sig);
+            lane.values.push_back(state == jtag::PinState::HIGH ? 1.0 : 0.0);
+            if (frame.trigger_point && trigger_sample_ < 0) {
+                trigger_sample_ = static_cast<int>(lane.times.size()) - 1;
+                trigger_time_ = us;
+            }
+        }
+    }
+    for (const auto& bus : buses) {
+        auto& lane = lanes_[lane_idx++];
+        for (const auto& frame : new_frames) {
+            const double us = static_cast<double>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    frame.timestamp - t0_).count());
+            lane.times.push_back(us);
+            lane.bus_values.push_back(computeBusValue(bus, frame.data));
+        }
+    }
+
+    // Update time bounds.
+    if (!lanes_.empty() && !lanes_[0].times.empty()) {
+        if (lanes_[0].times.size() == new_frames.size()) {
+            // All old data was evicted; reset earliest_time_.
+            earliest_time_ = lanes_[0].times.front();
+        }
+        latest_time_ = lanes_[0].times.back();
+    }
+
+    return true;
 }
 
 void WaveformView::setSignalAliases(const jtag::xdc::PinAliasMap& aliases) {

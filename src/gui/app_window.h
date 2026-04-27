@@ -49,6 +49,9 @@ private:
     void drawInterconnectPanel();
     void drawHelpWindow();
     void setStatusMessage(const std::string& message);
+    /// Update status bar only, without appending to the debug log.
+    /// Use for high-frequency progress updates (e.g. "Capturing... N samples").
+    void setStatusOnly(const std::string& message);
     bool refreshPinReadback(bool report_status);
 
     // Backend actions

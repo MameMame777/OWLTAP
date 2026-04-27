@@ -1465,7 +1465,7 @@ void AppWindow::refreshFromCapture() {
                                  "Capturing%s  %d samples (daemon)",
                                  kDots[dot_idx],
                                  progress["count"].get<int>());
-                        setStatusMessage(buf);
+                        setStatusOnly(buf);
                     }
                 }
             }
@@ -1519,7 +1519,7 @@ void AppWindow::refreshFromCapture() {
         snprintf(buf, sizeof(buf), "Capturing%s  %zu samples  %.1f Hz",
                  kDots[dot_idx], samples.size(),
                  capture_engine_->effectiveSampleRate());
-        setStatusMessage(buf);
+        setStatusOnly(buf);
     }
 }
 
@@ -1883,6 +1883,10 @@ void AppWindow::initializeDockLayout(unsigned int dockspace_id) {
 void AppWindow::setStatusMessage(const std::string& message) {
     status_text_ = firstLineOf(message);
     DebugLogPanel::append(message);
+}
+
+void AppWindow::setStatusOnly(const std::string& message) {
+    status_text_ = firstLineOf(message);
 }
 
 // ── Rendering ───────────────────────────────────────────────────────

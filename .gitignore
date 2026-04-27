@@ -51,3 +51,6 @@ hdl/ila/examples/*/program_board.log
 hdl/ila/sim/exec/*_regression.log
 hdl/ila/sim/scripts/regress_temp.log
 HWsample/
+# Test output artifacts
+*_stderr.txt
+*_stdout.txt

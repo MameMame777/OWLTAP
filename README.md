@@ -27,6 +27,7 @@ OWLTAP is a desktop application for interfacing with the JTAG TAP of an FPGA or 
 | **Safety guard** | Blocks EXTEST when Zynq PS\_DDR / PS\_MIO / PS\_POR\_B / PS\_SRST\_B pins detected |
 | **Waveform capture** | Continuous or triggered multi-channel capture with configurable depth |
 | **Trigger engine** | Rising edge, falling edge, either edge, level; pre/post-trigger ratio |
+| **Embedded ILA IP** | Vendor-neutral SystemVerilog Internal Logic Analyzer core (dedicated TAP and BSCANE2 variants) for high-speed in-PL capture |
 | **ImPlot waveform view** | Zoomable, pannable signal waveform display |
 | **MCP support** | Allow HW debug with your generative AI |
 | **VCD export** | Standard Value Change Dump export for GTKWave / Vivado logic analyser |
@@ -62,6 +63,74 @@ Verified hardware: Xilinx Zynq XA7Z020-CLG484 PL TAP + ARM DAP via FTDI FT4232H.
 │  FtdiDevice  (libftdi1)             │  ← USB bulk transfer
 └─────────────────────────────────────┘
 ```
+
+## Embedded ILA IP
+
+OwlTAP ships its Internal Logic Analyzerunder [hdl/ila/](hdl/ila/). 
+ Instantiate it in your design and drive it
+directly from this tool over JTAG to capture signals far above the
+boundary-scan sample rate.  Unlike the Xilinx ILA, the source is open and
+the JTAG register map is fully documented.
+
+| Aspect | Detail |
+|--------|--------|
+| RTL location | [hdl/ila/rtl/](hdl/ila/rtl/) |
+| Top-level variants | `ila_top` (dedicated TAP) / `ila_bscane2_top` (Xilinx `BSCANE2 USER1`) |
+| Capture width | `DATA_W` parameter (default `32` bits) |
+| Capture depth | `DEPTH` parameter (default `1024` samples; `DEPTH = 1 << ADDR_W`) |
+| Trigger engine | Group A: level (mask/value) + edge (rise/fall masks); Group B: level (mask2/val2); AND/OR composition via `TRIG_CTRL.or_mode` |
+| Pre/post trigger | `PRE_SAMPLES` register, default `DEPTH/4` |
+| IR length (dedicated TAP) | 5 bits |
+| Storage | Simple dual-port BRAM (`ram_style = "block"`), write @ `sample_clk`, read @ `tck` / `bscan_tck` |
+| CDC | Toggle-pulse sync for control pulses; 2-FF `ASYNC_REG` sync for quasi-static config and status |
+| IDCODE | `32'hA17A_0001` placeholder — override before production |
+| Reference design | [hdl/ila/examples/zybo_z7020/](hdl/ila/examples/zybo_z7020/) (Zybo Z7-20 bring-up; verified against `ila_bringup_top.bit`) |
+| Documentation | [hdl/ila/doc/integration.md](hdl/ila/doc/integration.md), [hdl/ila/rtl/rtl_spec.md](hdl/ila/rtl/rtl_spec.md) |
+
+### Variants
+
+- **Dedicated TAP — `ila_top`**: adds a separate IEEE 1149.1 TAP to the JTAG chain (IR = 5 bits). Use when the ILA must be reachable independently of the FPGA primary TAP, or on devices without a Xilinx BSCAN primitive.
+- **BSCANE2 — `ila_bscane2_top`**: wraps a Xilinx `BSCANE2 #(.JTAG_CHAIN(1)) USER1` primitive so the ILA shares the FPGA's existing TAP. No extra JTAG pins; preferred for in-system debug on 7-Series / UltraScale parts. DR frame is `{payload[DATA_W+4:5], opcode[4:0]}` (37 bits at `DATA_W=32`), shifted LSB-first.
+
+### Instruction / register map (dedicated TAP)
+
+| Opcode | Mnemonic | DR width | Access | Description |
+|--------|----------|----------|--------|-------------|
+| `5'h01` | `IDCODE` | 32 | R | JTAG IDCODE (default after TLR) |
+| `5'h02` | `CONFIG` | 32 | R | `{version[7:0], num_ch[3:0], sig_count[3:0], data_w-1[5:0], rsvd[1:0], addr_w[7:0]}`; current `VERSION = 8'h03` |
+| `5'h03` | `SIG_DEF` | 32 | R | Signal-definition ROM word (auto-iterates over `SIG_COUNT` entries) |
+| `5'h08` | `CTRL` | 4 | W | Bit0=ARM, Bit1=STOP, Bit2=RESET, Bit3=FORCE_TRIG (one-shot pulses) |
+| `5'h09` | `STATUS` | 8 | R | `{5'b0, full, triggered, armed}` |
+| `5'h0A` / `5'h0B` | `TRIG_MASK` / `TRIG_VAL` | `DATA_W` | R/W | Group A level comparator |
+| `5'h0F` / `5'h10` | `TRIG_RISE` / `TRIG_FALL` | `DATA_W` | R/W | Group A edge masks |
+| `5'h11` / `5'h12` | `TRIG_MASK2` / `TRIG_VAL2` | `DATA_W` | R/W | Group B level comparator |
+| `5'h13` | `TRIG_CTRL` | `DATA_W` | R/W | Bit0 = `or_mode` (Group A OR B) |
+| `5'h0C` | `READ_ADDR` | `ADDR_W` | R/W | BRAM read pointer |
+| `5'h0D` | `READ_DATA` | `DATA_W` | R | Captured word; auto-increments `READ_ADDR` at `Update-DR` |
+| `5'h0E` | `PRE_SAMPLES` | 16 | R/W | Pre-trigger sample count (low `ADDR_W` bits used) |
+| `5'h1F` | `BYPASS` | 1 | — | Mandatory IEEE 1149.1 BYPASS |
+
+### Recommended access sequence
+
+1. Drive TMS=1 for ≥5 TCKs (Test-Logic-Reset) and read `IDCODE`.
+2. Read `CONFIG` / `SIG_DEF` to discover depth, width and signal layout at runtime.
+3. Program `TRIG_MASK` / `TRIG_VAL` (and optionally `TRIG_RISE` / `TRIG_FALL` / Group B / `TRIG_CTRL`) plus `PRE_SAMPLES`.
+4. Issue `CTRL = 4'b0001` (ARM); poll `STATUS` until `full == 1`. Use `CTRL = 4'b1000` to force a trigger or `CTRL = 4'b0010` to stop early.
+5. Set `READ_ADDR = (trigger_addr - pre_samples) mod DEPTH`, then shift `READ_DATA` `DEPTH` times to drain the buffer.
+
+### Software side
+
+OwlTAP drives the ILA over JTAG via [src/ila/](src/ila/) (the daemon
+exposes both an `ila_top` backend and a `BSCANE2` backend).  The MCP tool
+`read_ila_status` returns the live `CONFIG` and `STATUS` register
+contents (version, depth, data width, signal count, armed / triggered /
+full flags); the GUI's ILA panel arms the core, polls status, and reads
+captured samples back into the waveform view.
+
+> **Note:** the default `IDCODE_VAL = 32'hA17A_0001` is a development
+> placeholder.  Before distributing hardware, encode a proper
+> manufacturer-assigned 32-bit IDCODE or document the conflict in your
+> board bring-up notes.
 
 ## Build
 
@@ -140,8 +209,10 @@ factors:
 > power-up sequencing, and bus idle/active states — not high-speed clocks or
 > fast GPIO toggles.
 
-For high-speed signal capture, use the **Xilinx Integrated Logic Analyser
-(ILA)** core instantiated inside your PL design.
+For high-speed signal capture, instantiate an ILA core inside your PL
+design — either the **Embedded ILA IP** shipped with this project (see
+the next section) or the vendor's own ILA (Xilinx Integrated Logic
+Analyser).
 
 ### Script Engine
 

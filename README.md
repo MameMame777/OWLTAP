@@ -28,6 +28,9 @@ OWLTAP is a desktop application for interfacing with the JTAG TAP of an FPGA or 
 | **Waveform capture** | Continuous or triggered multi-channel capture with configurable depth |
 | **Trigger engine** | Rising edge, falling edge, either edge, level; pre/post-trigger ratio |
 | **Embedded ILA IP** | Vendor-neutral SystemVerilog Internal Logic Analyzer core (dedicated TAP and BSCANE2 variants) for high-speed in-PL capture |
+| **JTAG daemon** | All hardware operations run in a background `jtag_daemon` process; GUI and MCP clients connect via JSON-RPC TCP — no direct hardware access required in the GUI process |
+| **Selective-pin capture** | GUI sends the selected signal list as a `pin_filter`; the daemon Scanner shifts out only the BSR bits needed (e.g. ~341 bits instead of 1077 for two Zynq I/O pins), improving sample rate roughly in proportion to the reduction |
+| **PL bitstream programming** | Load a `.bit` / `.bin` directly into the Zynq PL via JTAG from both GUI and daemon/MCP paths |
 | **ImPlot waveform view** | Zoomable, pannable signal waveform display |
 | **MCP support** | Allow HW debug with your generative AI |
 | **VCD export** | Standard Value Change Dump export for GTKWave / Vivado logic analyser |
@@ -299,17 +302,26 @@ bazelisk test //test/...
 
 | Target | What it covers |
 |--------|----------------|
-| `//test:bsdl_parser_test` | BSDL lexer + parser |
-| `//test:mpsse_test` | MPSSE command encoding |
-| `//test:tap_controller_test` | TAP state machine |
-| `//test:trigger_test` | Trigger engine |
-| `//test:scanner_test` | Boundary-scan decoder |
-| `//test:pin_driver_test` | BSR staging free functions |
-| `//test:script_engine_test` | Script parser + executor |
-| `//test:spi_flash_test` | MT25Q SPI flash command encoding |
-| `//test:capture_session_test` | Capture session ring buffer |
-| `//test:json_rpc_test` | JSON-RPC framing helpers |
-| `//test:tool_registry_test` | MCP tool registry |
+| `//test:bsdl_parser_test` | BSDL lexer + parser; instruction opcodes; boundary-cell extraction |
+| `//test:mpsse_test` | MPSSE command encoding (TMS, shift-in/out, clock divisor, bit ops) |
+| `//test:tap_controller_test` | TAP state-machine transitions; TMS path generation |
+| `//test:trigger_test` | Rising/falling/either-edge and level triggers; pre-trigger ratio; single-shot |
+| `//test:scanner_test` | Boundary-scan decode (input-cell preference, partial BSR, empty snapshot); regression: `setDecodeFilter({})` clears stale filter |
+| `//test:pin_driver_test` | BSR staging (HIGH/LOW/Hi-Z); EXTEST safety guard for Zynq PS pins; snapshot copy/mask |
+| `//test:script_engine_test` | Script parser and set/expect/apply/highz executor; error reporting |
+| `//test:pl_config_test` | PL bitstream bit-reversal and header stripping; status register decode |
+| `//test:bus_definition_test` | Multi-bit bus value decode (MSB/LSB first, unknown-pin handling); app-config serialization |
+| `//test:uart_decoder_test` | UART frame decode; parity/framing errors; multi-byte stream |
+| `//test:spi_decoder_test` | SPI frame decode for modes 0–3; LSB-first; CS gap handling |
+| `//test:i2c_decoder_test` | I2C write/read/repeated-start; NAK after address |
+| `//test:xdc_parser_test` | XDC `set_property PACKAGE_PIN` extraction; comment/non-pin line skipping |
+| `//test:spi_flash_test` | MT25Q SPI flash command encoding (read, write-enable, page-program, bulk-erase) |
+| `//test:mcs_parser_test` | Intel MCS/HEX record parsing; extended address; checksum mismatch detection |
+| `//test:ila_driver_test` | ILA register map (probe, config, status, trigger, read-data auto-increment); full capture flow smoke test |
+| `//test:hardware_job_test` | `HardwareJob` state transitions; result/progress/error fields; cancel atomicity; JSON snapshot |
+| `//test:capture_session_test` | Capture session state machine; buffer-depth and interval accessors; trigger round-trip |
+| `//test:json_rpc_test` | JSON-RPC 2.0 framing and parsing; error/result shapes; multi-message stream |
+| `//test:tool_registry_test` | MCP tool-registry parameter validation (required fields, type checking, null params) |
 
 ### Hardware-in-the-loop tests (FTDI adapter + target required)
 

@@ -41,6 +41,9 @@ cc_test(
     srcs = ["scanner_test.cpp"],
     deps = [
         "//src/boundary_scan:scanner",
+        "//src/ftdi:ftdi_device",
+        "//src/jtag:jtag_chain",
+        "//src/jtag:tap_controller",
         "@googletest//:gtest_main",
     ],
 )

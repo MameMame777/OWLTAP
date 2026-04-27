@@ -1,6 +1,9 @@
 #include "gtest/gtest.h"
 
 #include "src/boundary_scan/scanner.h"
+#include "src/ftdi/ftdi_device.h"
+#include "src/jtag/jtag_chain.h"
+#include "src/jtag/tap_controller.h"
 
 namespace jtag {
 namespace {
@@ -109,6 +112,28 @@ TEST(ScannerTest, DecodeBoundaryScanHandlesPartialBsr) {
     EXPECT_EQ(result.getPin("HIGH_PIN"), PinState::HIGH);
     // Cell 12 is beyond the 8-bit partial boundary -> getBit returns false -> LOW.
     EXPECT_EQ(result.getPin("FAR_PIN"),  PinState::LOW);
+}
+
+// Regression test: hardware/sample_bsr must clear any decode_filter_ left by
+// a prior capture_start job.  Verifies that setDecodeFilter({}) resets the
+// filter to "no filtering" state (size == 0).
+//
+// All constructors below are trivial (store references only) — no hardware
+// communication happens during construction, so this test runs without FTDI.
+TEST(ScannerTest, SetDecodeFilterEmptyVectorClearsFilter) {
+    FtdiDevice fd;            // no-hardware default ctor
+    TapController tap(fd);    // stores reference, no I/O
+    JtagChain chain(tap);     // stores reference, no I/O
+    Scanner sc(chain, 0);
+
+    // Simulate a prior GUI capture_start that set a pin filter.
+    sc.setDecodeFilter({"IO_M14"});
+    EXPECT_EQ(sc.decodeFilterSize(), 1u);
+
+    // hardware/sample_bsr must call setDecodeFilter({}) before sample().
+    // Verify that the empty-vector call clears the filter completely.
+    sc.setDecodeFilter({});
+    EXPECT_EQ(sc.decodeFilterSize(), 0u);
 }
 
 } // namespace

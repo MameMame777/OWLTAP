@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <map>
+#include <set>
 
 namespace jtag::gui {
 
@@ -141,6 +143,73 @@ void SignalPanel::populateFromBsdl(const jtag::bsdl::BSDLDevice& device) {
               [](const PinGroup& a, const PinGroup& b) { return a.name < b.name; });
 
     // Re-apply any existing XDC aliases so they survive a BSDL reload
+    if (!xdc_aliases_.empty()) {
+        for (auto& group : groups_) {
+            for (auto& pin : group.pins) {
+                auto it = xdc_aliases_.find(pin.name);
+                if (it != xdc_aliases_.end()) pin.label = it->second;
+            }
+        }
+    }
+}
+
+void SignalPanel::populateFromPinLists(
+    const std::vector<std::string>& observable,
+    const std::vector<std::string>& drivable) {
+    groups_.clear();
+    selected_order_.clear();
+    selection_changed_ = true;
+
+    // Build a set of drivable names for O(1) lookup.
+    std::set<std::string> drv_set(drivable.begin(), drivable.end());
+
+    std::map<std::string, PinEntry> seen;
+    for (const auto& name : observable) {
+        if (seen.count(name)) continue;
+        PinEntry entry;
+        entry.name      = name;
+        entry.label     = name;
+        entry.bsr_cell  = -1;  // not available without BSDL model
+        entry.selected  = false;
+        entry.direction = drv_set.count(name) ? "INOUT" : "IN";
+        seen.emplace(name, std::move(entry));
+    }
+    for (const auto& name : drivable) {
+        if (seen.count(name)) continue;
+        PinEntry entry;
+        entry.name      = name;
+        entry.label     = name;
+        entry.bsr_cell  = -1;
+        entry.selected  = false;
+        entry.direction = "OUT";
+        seen.emplace(name, std::move(entry));
+    }
+
+    // Group by prefix (same logic as populateFromBsdl).
+    std::map<std::string, std::vector<PinEntry>> grouped;
+    for (auto& [name, entry] : seen) {
+        std::string prefix;
+        for (size_t i = 0; i < name.size(); i++) {
+            if (name[i] == '_' ||
+                (i > 0 && std::isdigit(static_cast<unsigned char>(name[i])) &&
+                 !std::isdigit(static_cast<unsigned char>(name[i - 1])))) {
+                prefix = name.substr(0, i);
+                break;
+            }
+        }
+        if (prefix.empty()) prefix = name;
+        grouped[prefix].push_back(std::move(entry));
+    }
+    for (auto& [prefix, pins] : grouped) {
+        PinGroup group;
+        group.name = prefix;
+        group.pins = std::move(pins);
+        groups_.push_back(std::move(group));
+    }
+    std::sort(groups_.begin(), groups_.end(),
+              [](const PinGroup& a, const PinGroup& b) { return a.name < b.name; });
+
+    // Re-apply XDC aliases.
     if (!xdc_aliases_.empty()) {
         for (auto& group : groups_) {
             for (auto& pin : group.pins) {
@@ -469,8 +538,8 @@ void SignalPanel::draw() {
                 }
                 ImGui::SameLine(200);
                 ImGui::TextDisabled("%s", pin.direction.c_str());
-                ImGui::SameLine(260);
                 if (pin.bsr_cell >= 0) {
+                    ImGui::SameLine(260);
                     ImGui::TextDisabled("[%d]", pin.bsr_cell);
                 }
             }

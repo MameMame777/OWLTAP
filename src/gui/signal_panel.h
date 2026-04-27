@@ -19,6 +19,12 @@ public:
     /// Populate from BSDL device model.
     static void populateFromBsdl(const jtag::bsdl::BSDLDevice& device);
 
+    /// Populate from pin name lists (daemon mode: no local BSDL model).
+    /// observable: pins readable via JTAG SAMPLE.
+    /// drivable:   pins drivable via JTAG EXTEST.
+    static void populateFromPinLists(const std::vector<std::string>& observable,
+                                     const std::vector<std::string>& drivable);
+
     /// Get currently selected (checked) signal names.
     static std::vector<std::string> selectedSignals();
 

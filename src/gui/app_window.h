@@ -18,10 +18,6 @@
 #include "src/ftdi/ftdi_device.h"
 #include "src/jtag/jtag_chain.h"
 #include "src/jtag/tap_controller.h"
-#include "src/mcp/executor_bridge.h"
-#include "src/mcp/mcp_server.h"
-#include "src/mcp/mcp_transport.h"
-#include "src/hardware/hardware_executor.h"
 #include "src/script/test_suite.h"
 
 struct GLFWwindow;
@@ -78,10 +74,7 @@ private:
     void onRunSuite();
     void onExportSuiteReport();
 
-    // MCP server actions
-    void onMcpStartStdio();
-    void onMcpStartTcp(uint16_t port);
-    void onMcpStop();
+    // MCP server actions — removed; use jtag_viewer --mcp instead.
 
     // Daemon process controller actions
     void onDaemonStart();
@@ -129,6 +122,7 @@ private:
     int bsdl_device_index_ = -1;
     std::chrono::steady_clock::time_point last_refresh_{};
     std::vector<jtag::SampleFrame> cached_samples_;  // updated at ~20 Hz; used every render frame
+    std::string daemon_capture_job_id_;  // non-empty while a daemon capture job is running
     std::array<char, 8192> script_buffer_{};
     std::string script_path_;
     std::string script_output_;
@@ -178,12 +172,14 @@ private:
     std::unique_ptr<DaemonProcessController> daemon_ctrl_;
     std::unique_ptr<GuiDaemonClient>         gui_client_;
     uint16_t                                 daemon_last_reported_port_{0};
+    bool                                     pending_daemon_connect_{false};
 
     // Daemon connect-via-RPC background operation (Phase 3)
     std::atomic<bool> daemon_connect_running_{false};
     std::mutex        daemon_connect_mutex_;
     std::string       daemon_connect_result_;  // set by bg thread, cleared on drain
     std::thread       daemon_connect_thread_;
+    std::atomic<int>  daemon_bscane_idx_{-1};  // device index of Zynq PL TAP (-1 if not found)
 
     // Daemon hardware ownership cache — updated by periodic background poll.
     // Reflects hardware state as reported by the daemon's daemon/status RPC.
@@ -192,14 +188,6 @@ private:
     std::chrono::steady_clock::time_point last_daemon_status_poll_{};
     std::atomic<bool> daemon_status_poll_running_{false};
     std::thread       daemon_status_poll_thread_;
-
-    // MCP server (optional; created on-demand)
-    enum class McpMode { kOff, kStdio, kTcp };
-    McpMode                                    mcp_mode_{McpMode::kOff};
-    std::unique_ptr<hardware::HardwareExecutor> mcp_executor_;
-    std::unique_ptr<mcp::ExecutorBridge>        mcp_bridge_;
-    std::unique_ptr<mcp::McpServer>             mcp_server_;
-    uint16_t                                    mcp_tcp_port_{4711};
 };
 
 } // namespace jtag::gui

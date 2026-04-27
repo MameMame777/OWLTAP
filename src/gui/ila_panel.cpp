@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "gui_daemon_client.h"
 #include "src/jtag/jtag_chain.h"
 
 namespace jtag::gui {
@@ -64,10 +65,108 @@ IlaPanel::IlaPanel() = default;
 
 IlaPanel::~IlaPanel() = default;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Daemon mode helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool IlaPanel::daemonOk() const {
+    return daemon_client_ != nullptr && daemon_client_->isConnected();
+}
+
+bool IlaPanel::driverOk() const {
+    return driver_ != nullptr || daemonOk();
+}
+
+bool IlaPanel::isProbed() const {
+    return driver_ ? driver_->probed() : caps_remote_.probed;
+}
+
+const jtag::ila::IlaCaps& IlaPanel::activeCaps() const {
+    return driver_ ? driver_->caps() : caps_remote_;
+}
+
+const std::string& IlaPanel::activeLastError() const {
+    return driver_ ? driver_->lastError() : last_error_;
+}
+
+int IlaPanel::activeDepth() const {
+    return driver_ ? driver_->depth()
+                   : static_cast<int>(caps_remote_.depth ? caps_remote_.depth
+                                                         : jtag::ila::IlaDriver::kDepth);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// setDaemonClient — switch ILA panel to daemon mode
+// ─────────────────────────────────────────────────────────────────────────────
+
+void IlaPanel::setDaemonClient(GuiDaemonClient* client, int device_index,
+                                bool use_bscane) {
+    // Drop any direct-mode driver.
+    driver_.reset();
+    backend_.reset();
+
+    daemon_client_       = client;
+    daemon_device_index_ = device_index;
+    daemon_use_bscane_   = use_bscane;
+    caps_remote_         = {};
+    status_valid_        = false;
+    has_samples_         = false;
+    last_error_.clear();
+
+    if (!client || !client->isConnected()) return;
+
+    // Probe the ILA via daemon RPC to populate caps and signal defs.
+    try {
+        auto r = client->ilaProbe(device_index, use_bscane);
+        caps_remote_.version   = r.value("version",   0);
+        caps_remote_.num_ch    = r.value("num_ch",    1);
+        caps_remote_.sig_count = r.value("sig_count", 0);
+        caps_remote_.data_w    = r.value("data_w",    32);
+        caps_remote_.addr_w    = r.value("addr_w",    10);
+        caps_remote_.depth     = r.value("depth",     static_cast<uint32_t>(jtag::ila::IlaDriver::kDepth));
+        caps_remote_.raw       = r.value("raw",       0u);
+        caps_remote_.probed    = true;
+
+        if (pre_samples_ >= activeDepth())
+            pre_samples_ = activeDepth() / 4;
+
+        bool loaded = false;
+        if (r.contains("signal_defs") && r["signal_defs"].is_array()) {
+            signals_.clear();
+            for (const auto& e : r["signal_defs"]) {
+                IlaSignalDef d{};
+                const int hi       = e.value("hi", 31);
+                const int lo       = e.value("lo", 0);
+                const int name_idx = e.value("name_idx", 0xFF);
+                if (name_idx == 0xFF)
+                    std::snprintf(d.name, sizeof(d.name), "data[%d:%d]", hi, lo);
+                else
+                    std::snprintf(d.name, sizeof(d.name), "sig%u", name_idx);
+                d.hi  = hi;
+                d.lo  = lo;
+                d.fmt = static_cast<BusFormat>(e.value("fmt", 0));
+                signals_.push_back(d);
+            }
+            lane_triggers_.assign(signals_.size(), LaneTrigger{});
+            loaded = true;
+        }
+        rtl_sig_defs_loaded_ = loaded;
+        if (!loaded) resetSignalDefs();
+    } catch (const std::exception& e) {
+        last_error_ = e.what();
+        resetSignalDefs();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// resetSignalDefs
+// ─────────────────────────────────────────────────────────────────────────────
+
 void IlaPanel::resetSignalDefs() {
     signals_.clear();
-    const int dw = driverOk() ? driver_->dataWidth()
-                              : jtag::ila::IlaDriver::kDataWidth;
+    const int dw = driver_ ? driver_->dataWidth()
+                 : (caps_remote_.probed ? caps_remote_.data_w
+                                        : jtag::ila::IlaDriver::kDataWidth);
     IlaSignalDef d{};
     std::snprintf(d.name, sizeof(d.name), "data[%d:0]", dw - 1);
     d.hi  = dw - 1;
@@ -265,6 +364,21 @@ void IlaPanel::computeTriggerRegisters(uint32_t& mask, uint32_t& value,
 
 void IlaPanel::doArm() {
     if (!driverOk()) return;
+    if (daemonOk()) {
+        uint32_t mask = 0, val = 0, rise = 0, fall = 0, m2 = 0, v2 = 0;
+        computeTriggerRegisters(mask, val, rise, fall, m2, v2);
+        try {
+            daemon_client_->ilaArm(daemon_device_index_, daemon_use_bscane_,
+                                   mask, val, rise, fall, m2, v2, or_mode_,
+                                   pre_samples_);
+            last_error_.clear();
+            trigger_dirty_ = false;
+        } catch (const std::exception& e) {
+            last_error_ = e.what();
+        }
+        pollStatus();
+        return;
+    }
     uint32_t mask = 0, val = 0, rise = 0, fall = 0, m2 = 0, v2 = 0;
     computeTriggerRegisters(mask, val, rise, fall, m2, v2);
     auto pre = static_cast<uint16_t>(pre_samples_);
@@ -283,6 +397,14 @@ void IlaPanel::doArm() {
 
 void IlaPanel::doStop() {
     if (!driverOk()) return;
+    if (daemonOk()) {
+        try {
+            daemon_client_->ilaStop(daemon_device_index_, daemon_use_bscane_);
+            last_error_.clear();
+        } catch (const std::exception& e) { last_error_ = e.what(); }
+        pollStatus();
+        return;
+    }
     if (!driver_->stop())
         last_error_ = driver_->lastError();
     else
@@ -292,6 +414,14 @@ void IlaPanel::doStop() {
 
 void IlaPanel::doForce() {
     if (!driverOk()) return;
+    if (daemonOk()) {
+        try {
+            daemon_client_->ilaForce(daemon_device_index_, daemon_use_bscane_);
+            last_error_.clear();
+        } catch (const std::exception& e) { last_error_ = e.what(); }
+        pollStatus();
+        return;
+    }
     if (!driver_->forceTrigger())
         last_error_ = driver_->lastError();
     else
@@ -301,6 +431,15 @@ void IlaPanel::doForce() {
 
 void IlaPanel::doReset() {
     if (!driverOk()) return;
+    if (daemonOk()) {
+        try {
+            daemon_client_->ilaReset(daemon_device_index_, daemon_use_bscane_);
+            last_error_.clear();
+        } catch (const std::exception& e) { last_error_ = e.what(); }
+        status_valid_ = false;
+        has_samples_  = false;
+        return;
+    }
     if (!driver_->resetCapture())
         last_error_ = driver_->lastError();
     else
@@ -311,6 +450,29 @@ void IlaPanel::doReset() {
 
 void IlaPanel::doRead() {
     if (!driverOk()) return;
+    if (daemonOk()) {
+        try {
+            auto r = daemon_client_->ilaReadSamples(daemon_device_index_,
+                                                    daemon_use_bscane_);
+            if (!r.value("ok", false)) {
+                last_error_ = r.value("error", "read failed");
+                return;
+            }
+            samples_.clear();
+            if (r.contains("samples") && r["samples"].is_array()) {
+                for (const auto& v : r["samples"])
+                    samples_.push_back(v.get<uint32_t>());
+            }
+            last_error_.clear();
+            has_samples_ = !samples_.empty();
+            const int n = static_cast<int>(samples_.size());
+            wave_x_.resize(n);
+            for (int i = 0; i < n; ++i)
+                wave_x_[i] = static_cast<double>(i) * 8.0;
+            if (has_samples_ && sample_cb_) sample_cb_(samples_);
+        } catch (const std::exception& e) { last_error_ = e.what(); }
+        return;
+    }
     // Start from depth-1 so the BscaneIlaTapBackend prime scan (which
     // auto-increments READ_ADDR once) wraps around to 0 before the first read.
     if (!driver_->setReadAddr(static_cast<uint16_t>(driver_->depth() - 1))) {
@@ -337,6 +499,20 @@ void IlaPanel::doRead() {
 
 void IlaPanel::pollStatus() {
     if (!driverOk()) return;
+    if (daemonOk()) {
+        try {
+            auto r = daemon_client_->ilaStatus(daemon_device_index_,
+                                               daemon_use_bscane_);
+            if (r.contains("armed")) {
+                status_.armed     = r.value("armed",     false);
+                status_.triggered = r.value("triggered", false);
+                status_.full      = r.value("full",      false);
+                status_valid_ = true;
+                last_error_.clear();
+            }
+        } catch (const std::exception& e) { last_error_ = e.what(); }
+        return;
+    }
     jtag::ila::IlaStatus s{};
     if (driver_->readStatus(s)) {
         status_       = s;
@@ -362,13 +538,13 @@ void IlaPanel::draw() {
     const bool hw_ok = driverOk();
 
     // ── CAPS line (shown when probed) ────────────────────────────────
-    if (hw_ok && driver_->probed()) {
-        const auto& c = driver_->caps();
+    if (hw_ok && isProbed()) {
+        const auto& c = activeCaps();
         ImGui::TextDisabled("CAPS: DW=%d  Depth=%d  NUM_CH=%d  SIG_COUNT=%d  ver=0x%02X",
                             c.data_w, c.depth, c.num_ch, c.sig_count, c.version);
     } else if (hw_ok) {
         ImGui::TextDisabled("CAPS: (not probed) -- %s",
-                            driver_->lastError().c_str());
+                            activeLastError().c_str());
     } else {
         ImGui::TextDisabled("CAPS: --");
     }
@@ -412,14 +588,14 @@ void IlaPanel::draw() {
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::TextDisabled("Mask=0x%08X  Value=0x%08X", cm, cv);
-        const bool has_edge = hw_ok && driver_->probed()
-                              && driver_->caps().version >= 2;
+        const bool has_edge = hw_ok && isProbed()
+                              && activeCaps().version >= 2;
         if (has_edge) {
             ImGui::SameLine();
             ImGui::TextDisabled(" Rise=0x%08X  Fall=0x%08X", cr, cf);
         }
-        const bool has_or = hw_ok && driver_->probed()
-                            && driver_->caps().version >= 3;
+        const bool has_or = hw_ok && isProbed()
+                            && activeCaps().version >= 3;
         if (has_or && or_mode_) {
             ImGui::SameLine();
             ImGui::TextDisabled(" B: Mask=0x%08X  Val=0x%08X", cm2, cv2);
@@ -429,8 +605,7 @@ void IlaPanel::draw() {
     ImGui::Text("Pre-samples:      ");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(120);
-    if (ImGui::SliderInt("##pre", &pre_samples_, 0,
-                         (driverOk() ? driver_->depth() : jtag::ila::IlaDriver::kDepth) - 1))
+    if (ImGui::SliderInt("##pre", &pre_samples_, 0, activeDepth() - 1))
         trigger_dirty_ = true;
 
     if (trigger_dirty_)
@@ -504,8 +679,9 @@ void IlaPanel::drawSignalEditor() {
     if (ImGui::SmallButton("Reset from CAPS")) resetSignalDefs();
     ImGui::SameLine();
     if (ImGui::SmallButton("+ Add")) {
-        const int dw = driverOk() ? driver_->dataWidth()
-                                  : jtag::ila::IlaDriver::kDataWidth;
+        const int dw = driver_ ? driver_->dataWidth()
+                     : (caps_remote_.probed ? caps_remote_.data_w
+                                            : jtag::ila::IlaDriver::kDataWidth);
         IlaSignalDef d{};
         std::snprintf(d.name, sizeof(d.name), "sig");
         d.hi  = dw - 1;

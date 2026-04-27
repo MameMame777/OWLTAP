@@ -11,5 +11,6 @@ cc_binary(
     srcs = ["main.cpp"],
     deps = [
         "//src/gui:gui",
+        "//src/tools:daemon_runner",
     ],
 )

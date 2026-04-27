@@ -257,7 +257,14 @@ void GuiDaemonClient::readerLoop() {
         ssize_t n = ::recv(impl_->sock, tmp, sizeof(tmp), 0);
 #endif
         if (n <= 0) {
-            // Connection closed or error.
+            // Distinguish a timeout (SO_RCVTIMEO) from a real disconnect.
+            // On timeout we simply loop again; only break on actual close/error.
+#ifdef _WIN32
+            if (n == SOCKET_ERROR && WSAGetLastError() == WSAETIMEDOUT) continue;
+#else
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) continue;
+#endif
+            // Connection closed or hard error — stop the reader.
             break;
         }
 
@@ -394,6 +401,117 @@ nlohmann::json GuiDaemonClient::readPin(int device_index,
                                          int timeout_ms) {
     return call("hardware/read_pin",
                 {{"device_index", device_index}, {"pin_name", pin_name}},
+                timeout_ms);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: capture and ILA helpers
+// ---------------------------------------------------------------------------
+
+nlohmann::json GuiDaemonClient::captureStart(int device_index,
+                                              int buffer_depth,
+                                              int interval_us,
+                                              const std::string& trigger_mode,
+                                              int timeout_ms) {
+    return call("capture/start",
+                {{"device_index", device_index},
+                 {"buffer_depth",  buffer_depth},
+                 {"interval_us",   interval_us},
+                 {"trigger_mode",  trigger_mode}},
+                timeout_ms);
+}
+
+nlohmann::json GuiDaemonClient::captureStop(const std::string& job_id,
+                                             int timeout_ms) {
+    return call("capture/stop", {{"job_id", job_id}}, timeout_ms);
+}
+
+nlohmann::json GuiDaemonClient::captureGetSamples(const std::string& job_id,
+                                                   int timeout_ms) {
+    return call("capture/get_samples", {{"job_id", job_id}}, timeout_ms);
+}
+
+nlohmann::json GuiDaemonClient::jobPoll(const std::string& job_id,
+                                         int timeout_ms) {
+    return call("job/poll", {{"job_id", job_id}}, timeout_ms);
+}
+
+nlohmann::json GuiDaemonClient::ilaStatus(int device_index, bool use_bscane,
+                                           int timeout_ms) {
+    return call("ila/status",
+                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                timeout_ms);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5+: ILA high-level daemon operations
+// ---------------------------------------------------------------------------
+
+nlohmann::json GuiDaemonClient::ilaProbe(int device_index, bool use_bscane,
+                                          int timeout_ms) {
+    return call("ila/probe",
+                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                timeout_ms);
+}
+
+nlohmann::json GuiDaemonClient::ilaArm(int device_index, bool use_bscane,
+                                        uint32_t mask, uint32_t value,
+                                        uint32_t rise_mask, uint32_t fall_mask,
+                                        uint32_t mask2, uint32_t val2,
+                                        bool or_mode, int pre_samples,
+                                        int timeout_ms) {
+    return call("ila/arm",
+                {{"device_index", device_index}, {"use_bscane", use_bscane},
+                 {"mask",  mask},  {"value",     value},
+                 {"rise_mask", rise_mask}, {"fall_mask", fall_mask},
+                 {"mask2", mask2}, {"val2",      val2},
+                 {"or_mode", or_mode}, {"pre_samples", pre_samples}},
+                timeout_ms);
+}
+
+nlohmann::json GuiDaemonClient::ilaStop(int device_index, bool use_bscane,
+                                         int timeout_ms) {
+    return call("ila/stop",
+                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                timeout_ms);
+}
+
+nlohmann::json GuiDaemonClient::ilaForce(int device_index, bool use_bscane,
+                                          int timeout_ms) {
+    return call("ila/force_trigger",
+                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                timeout_ms);
+}
+
+nlohmann::json GuiDaemonClient::ilaReset(int device_index, bool use_bscane,
+                                          int timeout_ms) {
+    return call("ila/reset",
+                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                timeout_ms);
+}
+
+nlohmann::json GuiDaemonClient::ilaReadSamples(int device_index, bool use_bscane,
+                                                int timeout_ms) {
+    return call("ila/read_samples",
+                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                timeout_ms);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: BSR sample-all and script execution
+// ---------------------------------------------------------------------------
+
+nlohmann::json GuiDaemonClient::sampleBsr(int device_index, int timeout_ms) {
+    return call("hardware/sample_bsr", {{"device_index", device_index}},
+                timeout_ms);
+}
+
+nlohmann::json GuiDaemonClient::runScript(int device_index,
+                                           const std::string& script_text,
+                                           int timeout_ms) {
+    return call("script/run",
+                {{"device_index", device_index},
+                 {"script_text",  script_text}},
                 timeout_ms);
 }
 

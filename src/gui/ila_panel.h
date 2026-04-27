@@ -19,6 +19,9 @@ namespace jtag {
 class JtagChain;
 } // namespace jtag
 
+// Forward-declare to avoid including gui_daemon_client.h in the header.
+namespace jtag::gui { class GuiDaemonClient; }
+
 namespace jtag::gui {
 
 /// Per-signal-lane trigger condition selector.
@@ -85,6 +88,12 @@ public:
     /// Attach the chain for a BSCANE2-based ILA (`BscaneIlaTapBackend`).
     void setBscaneChain(jtag::JtagChain* chain, int pl_tap_index);
 
+    /// Attach a daemon client for daemon-mode ILA access.
+    /// Pass nullptr to detach and fall back to direct mode.
+    /// use_bscane=true selects BscaneIlaTapBackend on the daemon side.
+    void setDaemonClient(GuiDaemonClient* client, int device_index,
+                         bool use_bscane = false);
+
     /// Optional external callback that also receives samples after a read.
     void setSampleCallback(SampleCallback cb) { sample_cb_ = std::move(cb); }
 
@@ -128,11 +137,24 @@ private:
                                   uint32_t& rise_mask, uint32_t& fall_mask,
                                   uint32_t& mask2, uint32_t& val2) const;
 
-    bool driverOk() const { return driver_ != nullptr; }
+    bool driverOk() const;   // true when driver_ != nullptr OR daemon is connected
+    bool daemonOk() const;   // true when daemon_client_ != nullptr && isConnected()
 
-    // ILA backend
+    // Helpers to access active caps/error in either direct or daemon mode.
+    bool isProbed() const;
+    const jtag::ila::IlaCaps& activeCaps() const;
+    const std::string& activeLastError() const;
+    int activeDepth() const;
+
+    // ILA backend (direct mode)
     std::unique_ptr<jtag::ila::IlaTapBackend> backend_;
     std::unique_ptr<jtag::ila::IlaDriver>     driver_;
+
+    // Daemon mode state
+    GuiDaemonClient*        daemon_client_       = nullptr;
+    int                     daemon_device_index_ = 0;
+    bool                    daemon_use_bscane_   = false;
+    jtag::ila::IlaCaps      caps_remote_{};   ///< caps received via ila/probe RPC
 
     // Trigger config UI state
     int                  pre_samples_   = jtag::ila::IlaDriver::kDepth / 4;

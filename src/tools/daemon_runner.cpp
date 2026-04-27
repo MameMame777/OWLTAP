@@ -465,6 +465,9 @@ int runDaemon(int argc, char* argv[]) {
                     [dev_idx](jtag::hardware::HardwareContext& ctx,
                               jtag::hardware::HardwareJob& /*job*/) -> nlohmann::json {
                         jtag::Scanner& sc = ctx.scanner(dev_idx);
+                        // Always clear any decode filter left by a prior GUI
+                        // capture job so all pins are returned.
+                        sc.setDecodeFilter({});
                         jtag::ScanResult result = sc.sample();
                         if (!sc.lastError().empty()) {
                             throw std::runtime_error(sc.lastError());

@@ -218,7 +218,7 @@ and load them at runtime via **Device → Load BSDL**.
 </p>
 
 <p align="center">
-  <img src="docs/jtagWave.png" alt="Waveform capture" width="800"/><br/>
+  <img src="docs/JTAGwave.png" alt="Waveform capture" width="800"/><br/>
   <em>Boundary-scan waveform capture — IO_M14 and IO_M15 sampled at ~1 kHz via JTAG BSR</em>
 </p>
 

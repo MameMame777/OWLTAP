@@ -125,6 +125,8 @@ private:
     int bsdl_device_index_ = -1;
     std::chrono::steady_clock::time_point last_refresh_{};
     std::vector<jtag::SampleFrame> cached_samples_;  // updated at ~20 Hz; used every render frame
+    size_t capture_last_total_ = 0;  // total_written_ value at last incremental fetch
+    int capture_buffer_depth_ = 10000;  // ring buffer depth, configurable before capture
     std::string daemon_capture_job_id_;  // non-empty while a daemon capture job is running
     std::array<char, 8192> script_buffer_{};
     std::string script_path_;

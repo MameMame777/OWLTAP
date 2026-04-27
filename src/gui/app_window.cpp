@@ -448,7 +448,7 @@ void AppWindow::run() {
         }
         // Trigger dialog
         if (show_trigger_dialog_) {
-            TriggerDialog::draw(&show_trigger_dialog_);
+            TriggerDialog::draw(&show_trigger_dialog_, &capture_buffer_depth_);
             // Sync run_mode_ when dialog closes (OK pressed)
             if (!show_trigger_dialog_ && capture_engine_) {
                 auto m = capture_engine_->trigger().mode();
@@ -1291,13 +1291,15 @@ void AppWindow::onStartCapture() {
             const std::string mode_str =
                 (run_mode_ == jtag::TriggerMode::SINGLE) ? "single" :
                 (run_mode_ == jtag::TriggerMode::NORMAL) ? "normal" : "free_run";
-            auto result = gui_client_->captureStart(bsdl_device_index_, 10000,
+            auto result = gui_client_->captureStart(bsdl_device_index_,
+                                                    capture_buffer_depth_,
                                                     1000, mode_str);
             if (result.contains("job_id")) {
                 daemon_capture_job_id_ = result["job_id"].get<std::string>();
                 capturing_ = true;
                 extest_outputs_active_ = false;
                 cached_samples_.clear();
+                capture_last_total_ = 0;
                 last_refresh_ = std::chrono::steady_clock::now();
                 syncSelectionViews(std::vector<jtag::SampleFrame>{});
                 WaveformView::requestResetView();
@@ -1314,11 +1316,13 @@ void AppWindow::onStartCapture() {
     if (!capture_engine_) return;
     if (capture_engine_->state() != jtag::CaptureState::STOPPED)
         capture_engine_->stop();
+    capture_engine_->setBufferDepth(static_cast<size_t>(capture_buffer_depth_));
     capture_engine_->trigger().setMode(run_mode_);
     if (capture_engine_->start()) {
         capturing_ = true;
         extest_outputs_active_ = false;
         cached_samples_.clear();
+        capture_last_total_ = 0;
         last_refresh_ = std::chrono::steady_clock::now();
         syncSelectionViews(std::vector<jtag::SampleFrame>{});
         WaveformView::requestResetView();
@@ -1356,13 +1360,15 @@ void AppWindow::onSingleCapture() {
         if (bsdl_device_index_ < 0) return;
         if (capturing_) return;
         try {
-            auto result = gui_client_->captureStart(bsdl_device_index_, 10000,
+            auto result = gui_client_->captureStart(bsdl_device_index_,
+                                                    capture_buffer_depth_,
                                                     1000, "single");
             if (result.contains("job_id")) {
                 daemon_capture_job_id_ = result["job_id"].get<std::string>();
                 capturing_ = true;
                 extest_outputs_active_ = false;
                 cached_samples_.clear();
+                capture_last_total_ = 0;
                 last_refresh_ = std::chrono::steady_clock::now();
                 syncSelectionViews(std::vector<jtag::SampleFrame>{});
                 WaveformView::requestResetView();
@@ -1379,11 +1385,13 @@ void AppWindow::onSingleCapture() {
     if (!capture_engine_) return;
     if (capture_engine_->state() != jtag::CaptureState::STOPPED)
         capture_engine_->stop();
+    capture_engine_->setBufferDepth(static_cast<size_t>(capture_buffer_depth_));
     capture_engine_->trigger().setMode(jtag::TriggerMode::SINGLE);
     if (capture_engine_->start()) {
         capturing_ = true;
         extest_outputs_active_ = false;
         cached_samples_.clear();
+        capture_last_total_ = 0;
         last_refresh_ = std::chrono::steady_clock::now();
         syncSelectionViews(std::vector<jtag::SampleFrame>{});
         WaveformView::requestResetView();
@@ -1480,13 +1488,24 @@ void AppWindow::refreshFromCapture() {
     // ── Direct capture path ──────────────────────────────────────────────────
     if (!capture_engine_ || !scanner_) return;
 
-    auto samples = capture_engine_->getSamples();
-    cached_samples_ = samples;  // update GUI cache (read every render frame)
-    if (samples.empty()) return;
+    // Incremental fetch: only copy samples written since last refresh.
+    // This avoids copying the entire ring buffer (O(N)) every 50 ms.
+    auto new_frames = capture_engine_->getNewSamples(capture_last_total_);
+    if (!new_frames.empty()) {
+        for (auto& f : new_frames) cached_samples_.push_back(std::move(f));
+        // Evict oldest entries when cache exceeds the configured buffer depth.
+        const size_t depth = static_cast<size_t>(capture_buffer_depth_);
+        if (cached_samples_.size() > depth) {
+            cached_samples_.erase(cached_samples_.begin(),
+                                  cached_samples_.begin() +
+                                  static_cast<ptrdiff_t>(cached_samples_.size() - depth));
+        }
+    }
+    if (cached_samples_.empty()) return;
 
-    syncSelectionViews(samples);
-    if (pin_driver_ && !samples.back().data.raw_bsr.empty()) {
-        pin_driver_->loadSnapshot(samples.back().data.raw_bsr);
+    syncSelectionViews(cached_samples_);
+    if (pin_driver_ && !cached_samples_.back().data.raw_bsr.empty()) {
+        pin_driver_->loadSnapshot(cached_samples_.back().data.raw_bsr);
     }
 
     // Check capture state
@@ -1501,7 +1520,7 @@ void AppWindow::refreshFromCapture() {
         capturing_ = false;
         char buf[128];
         snprintf(buf, sizeof(buf), "Capture complete. %zu samples. %.1f Hz.",
-                 samples.size(), capture_engine_->effectiveSampleRate());
+                 cached_samples_.size(), capture_engine_->effectiveSampleRate());
         setStatusMessage(buf);
     } else if (capturing_ &&
                capture_engine_->trigger().mode() == jtag::TriggerMode::FREE_RUN &&
@@ -1510,7 +1529,7 @@ void AppWindow::refreshFromCapture() {
         // a live status indicator so the user knows acquisition is still running.
         char buf[128];
         snprintf(buf, sizeof(buf), "Capturing  %zu samples  %.1f Hz",
-                 samples.size(),
+                 cached_samples_.size(),
                  capture_engine_->effectiveSampleRate());
         setStatusOnly(buf);
     }

@@ -12,7 +12,8 @@ namespace jtag::gui {
 class TriggerDialog {
 public:
     /// Draw the dialog popup. Set *p_open to false to close.
-    static void draw(bool* p_open);
+    /// @param p_buffer_depth  Pointer to the caller's buffer depth value (editable in dialog).
+    static void draw(bool* p_open, int* p_buffer_depth = nullptr);
 
     /// Bind to a scanner and trigger engine. Must call before draw().
     static void bind(jtag::Scanner* scanner, jtag::TriggerEngine* trigger);

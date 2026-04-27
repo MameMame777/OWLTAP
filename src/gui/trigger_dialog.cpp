@@ -33,7 +33,7 @@ void TriggerDialog::bind(jtag::Scanner* scanner,
     }
 }
 
-void TriggerDialog::draw(bool* p_open) {
+void TriggerDialog::draw(bool* p_open, int* p_buffer_depth) {
     if (!trigger_) {
         *p_open = false;
         return;
@@ -53,6 +53,22 @@ void TriggerDialog::draw(bool* p_open) {
             ImGui::Combo("Mode", &mode_idx_, modes, 2);
             ImGui::SliderFloat("Pre-trigger ratio", &pretrigger_, 0.0f, 1.0f,
                                "%.1f");
+            if (p_buffer_depth) {
+                ImGui::InputInt("Buffer Depth (samples)", p_buffer_depth);
+                if (*p_buffer_depth < 100)  *p_buffer_depth = 100;
+                if (*p_buffer_depth > 100000) *p_buffer_depth = 100000;
+                ImGui::SameLine();
+                ImGui::TextDisabled("(?");
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip(
+                        "Ring buffer size.\n"
+                        "Older samples are overwritten when full.\n"
+                        "Range: 100 - 100000.");
+                    ImGui::SameLine(); ImGui::TextDisabled(")");
+                } else {
+                    ImGui::SameLine(); ImGui::TextDisabled(")");
+                }
+            }
         }
 
         // Condition editor

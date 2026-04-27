@@ -80,6 +80,12 @@ public:
     /// Get all captured samples (thread-safe copy).
     std::vector<SampleFrame> getSamples() const;
 
+    /// Get only samples written since last call (incremental, low-overhead).
+    /// @param inout_last_total  In: total written at last call (0 = first call).
+    ///                         Out: updated to current total_written_.
+    /// Returns newly-added frames only. Falls back to full copy if ring wrapped.
+    std::vector<SampleFrame> getNewSamples(size_t& inout_last_total) const;
+
     /// Clear all captured samples while stopped.
     void clearSamples();
 
@@ -108,6 +114,7 @@ private:
     std::vector<SampleFrame> buffer_;
     size_t write_pos_ = 0;
     size_t count_ = 0;
+    std::atomic<size_t> total_written_{0};  // monotonic write counter
     int trigger_sample_index_ = -1;
     size_t post_trigger_remaining_ = 0;
 

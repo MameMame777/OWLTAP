@@ -111,9 +111,46 @@ void CaptureEngine::clearSamples() {
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     write_pos_ = 0;
     count_ = 0;
+    total_written_.store(0, std::memory_order_relaxed);
     trigger_sample_index_ = -1;
     post_trigger_remaining_ = 0;
     effective_rate_.store(0.0);
+}
+
+std::vector<SampleFrame> CaptureEngine::getNewSamples(
+        size_t& inout_last_total) const {
+    std::lock_guard<std::mutex> lock(buffer_mutex_);
+
+    const size_t current = total_written_.load(std::memory_order_relaxed);
+    if (current <= inout_last_total) {
+        return {};  // nothing new
+    }
+
+    const size_t new_count = current - inout_last_total;
+
+    // If ring has wrapped since last call, fall back to full copy.
+    if (new_count > buffer_.size()) {
+        inout_last_total = current;
+        std::vector<SampleFrame> result;
+        result.reserve(count_);
+        for (size_t i = 0; i < buffer_.size(); i++) {
+            size_t idx = (write_pos_ + i) % buffer_.size();
+            result.push_back(buffer_[idx]);
+        }
+        return result;
+    }
+
+    // Return only the new frames (oldest-first).
+    // They occupy physical indices [inout_last_total % size .. current % size).
+    std::vector<SampleFrame> result;
+    result.reserve(new_count);
+    const size_t sz = buffer_.size();
+    for (size_t i = 0; i < new_count; i++) {
+        size_t idx = (inout_last_total + i) % sz;
+        result.push_back(buffer_[idx]);
+    }
+    inout_last_total = current;
+    return result;
 }
 
 SampleFrame CaptureEngine::getLatestSample() const {
@@ -185,6 +222,7 @@ void CaptureEngine::captureLoop() {
             buffer_[write_pos_] = frame;
             write_pos_ = (write_pos_ + 1) % buffer_.size();
             if (count_ < buffer_.size()) count_++;
+            total_written_.fetch_add(1, std::memory_order_relaxed);
         }
 
         sample_count++;

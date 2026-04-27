@@ -1462,9 +1462,9 @@ void AppWindow::refreshFromCapture() {
                         dot_idx = (dot_idx + 1) % 4;
                         char buf[128];
                         snprintf(buf, sizeof(buf),
-                                 "Capturing%s  %d samples (daemon)",
-                                 kDots[dot_idx],
-                                 progress["count"].get<int>());
+                                 "Capturing  %d samples (daemon) %s",
+                                 progress["count"].get<int>(),
+                                 kDots[dot_idx]);
                         setStatusOnly(buf);
                     }
                 }
@@ -1516,9 +1516,10 @@ void AppWindow::refreshFromCapture() {
         static int dot_idx = 0;
         dot_idx = (dot_idx + 1) % 4;
         char buf[128];
-        snprintf(buf, sizeof(buf), "Capturing%s  %zu samples  %.1f Hz",
-                 kDots[dot_idx], samples.size(),
-                 capture_engine_->effectiveSampleRate());
+        snprintf(buf, sizeof(buf), "Capturing  %zu samples  %.1f Hz %s",
+                 samples.size(),
+                 capture_engine_->effectiveSampleRate(),
+                 kDots[dot_idx]);
         setStatusOnly(buf);
     }
 }

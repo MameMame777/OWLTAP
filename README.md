@@ -10,9 +10,15 @@
 </p>
 
 ---
-O:OpenSource
-W:Waveform
-L:Logger
+O:OpenSource\n
+W:Waveform\n
+L:Logger\n
+
+<p align="center">
+  <img src="docs/GUI.png" alt="GUI panel" width="800"/><br/>
+  <em>GUI panel</em>
+</p>
+
 
 OWLTAP is a desktop application for interfacing with the JTAG TAP of an FPGA or SoC device, providing boundary-scan control, signal capture, and waveform visualization.
 
@@ -68,6 +74,11 @@ Verified hardware: Xilinx Zynq XA7Z020-CLG484 PL TAP + ARM DAP via FTDI FT4232H.
 ```
 
 ## Embedded ILA IP
+
+<p align="center">
+  <img src="docs/ILA.png" alt="Internal Logic Analyzer panel" width="800"/><br/>
+  <em>ILA panel — arm, trigger, read 1024 samples at 125 MHz from in-PL capture core</em>
+</p>
 
 OwlTAP ships its Internal Logic Analyzerunder [hdl/ila/](hdl/ila/). 
  Instantiate it in your design and drive it
@@ -195,6 +206,16 @@ and load them at runtime via **Device → Load BSDL**.
 5. **Signal Panel**: select pins to monitor or drive.
 6. **Capture** → **Start** to begin waveform acquisition.
 7. **File** → **Export VCD** to save captured waveforms.
+
+<p align="center">
+  <img src="docs/FTDIconnection.png" alt="FTDI Connect dialog" width="480"/><br/>
+  <em>Connect dialog — select FTDI device, interface, and TCK clock frequency</em>
+</p>
+
+<p align="center">
+  <img src="docs/jtagWave.png" alt="Waveform capture" width="800"/><br/>
+  <em>Boundary-scan waveform capture — IO_M14 and IO_M15 sampled at ~1 kHz via JTAG BSR</em>
+</p>
 
 ### Sampling rate and signal bandwidth
 

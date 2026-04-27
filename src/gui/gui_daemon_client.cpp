@@ -412,13 +412,18 @@ nlohmann::json GuiDaemonClient::captureStart(int device_index,
                                               int buffer_depth,
                                               int interval_us,
                                               const std::string& trigger_mode,
+                                              const std::vector<std::string>& pin_filter,
                                               int timeout_ms) {
-    return call("capture/start",
-                {{"device_index", device_index},
-                 {"buffer_depth",  buffer_depth},
-                 {"interval_us",   interval_us},
-                 {"trigger_mode",  trigger_mode}},
-                timeout_ms);
+    nlohmann::json params = {
+        {"device_index", device_index},
+        {"buffer_depth",  buffer_depth},
+        {"interval_us",   interval_us},
+        {"trigger_mode",  trigger_mode}
+    };
+    if (!pin_filter.empty()) {
+        params["pin_filter"] = pin_filter;
+    }
+    return call("capture/start", params, timeout_ms);
 }
 
 nlohmann::json GuiDaemonClient::captureStop(const std::string& job_id,
@@ -512,6 +517,15 @@ nlohmann::json GuiDaemonClient::runScript(int device_index,
     return call("script/run",
                 {{"device_index", device_index},
                  {"script_text",  script_text}},
+                timeout_ms);
+}
+
+nlohmann::json GuiDaemonClient::programPl(int device_index,
+                                           const std::string& bitstream_path,
+                                           int timeout_ms) {
+    return call("hardware/program_pl",
+                {{"device_index",   device_index},
+                 {"bitstream_path", bitstream_path}},
                 timeout_ms);
 }
 

@@ -385,7 +385,9 @@ void registerHardwareTools(ToolRegistry& registry, ExecutorBridge& bridge) {
                 {"interval_us",   {{"type", "integer"},
                                     {"description", "Sample interval in microseconds (default 1000)"}}},
                 {"trigger_mode",  {{"type", "string"},
-                                    {"description", "free_run | single | normal (default free_run)"}}}
+                                    {"description", "free_run | single | normal (default free_run)"}}},
+                {"pin_filter",    {{"type", "array"}, {"items", {{"type", "string"}}},
+                                    {"description", "Only decode these pin names (empty = all pins)"}}}
             }}
         },
         [&bridge](nlohmann::json params) -> nlohmann::json {
@@ -395,15 +397,27 @@ void registerHardwareTools(ToolRegistry& registry, ExecutorBridge& bridge) {
             std::string mode_str = params.value("trigger_mode",
                                                  std::string{"free_run"});
 
+            // Optional pin filter: limits BSR decode and JSON serialisation to
+            // the selected pins, which dramatically reduces per-sample overhead.
+            std::vector<std::string> pin_filter;
+            if (params.contains("pin_filter") && params["pin_filter"].is_array()) {
+                for (const auto& p : params["pin_filter"])
+                    pin_filter.push_back(p.get<std::string>());
+            }
+
             TriggerMode tmode = TriggerMode::FREE_RUN;
             if (mode_str == "single")   tmode = TriggerMode::SINGLE;
             else if (mode_str == "normal") tmode = TriggerMode::NORMAL;
 
             return bridge.submitAsync(
-                [dev_idx, buf_depth, interval, tmode](
+                [dev_idx, buf_depth, interval, tmode,
+                 pin_filter = std::move(pin_filter)](
                     hardware::HardwareContext& ctx,
                     hardware::HardwareJob& job) -> nlohmann::json {
                     Scanner& sc = ctx.scanner(dev_idx);
+                    // Apply decode filter on daemon's scanner for partial BSR read
+                    // and reduced JSON payload.
+                    sc.setDecodeFilter(pin_filter);
                     hardware::CaptureSession cs(sc);
                     cs.setBufferDepth(static_cast<std::size_t>(buf_depth));
                     cs.setSampleInterval(static_cast<uint32_t>(interval));

@@ -136,8 +136,11 @@ ScanResult Scanner::sample() {
     // before the new DR path is available.
     chain_.tap().clkIdle(2);
 
-    // Read BSR
-    if (!chain_.readBSR(device_index_, result.raw_bsr)) {
+    // Read BSR — use partial read when a decode filter is active.
+    // Only shift out bits 0..(maxNeededBsrBits-1); saves 3x+ JTAG clocks for
+    // small selections on a 1077-bit BSR.
+    const int partial = maxNeededBsrBits();
+    if (!chain_.readBSR(device_index_, result.raw_bsr, partial)) {
         last_error_ = chain_.lastError();
         return result;
     }
@@ -160,6 +163,22 @@ ScanResult Scanner::sample() {
 void Scanner::setDecodeFilter(const std::vector<std::string>& names) {
     decode_filter_.clear();
     decode_filter_.insert(names.begin(), names.end());
+}
+
+int Scanner::maxNeededBsrBits() const {
+    if (decode_filter_.empty()) return 0;  // no filter -> read full BSR
+
+    const auto* dev = bsdlDevice();
+    if (!dev) return 0;
+
+    int max_pos = -1;
+    for (const auto& cell : dev->boundary_cells) {
+        if (!cell.hasPin()) continue;
+        if (decode_filter_.count(cell.pin_name) == 0) continue;
+        if (cell.position > max_pos) max_pos = cell.position;
+    }
+
+    return (max_pos >= 0) ? (max_pos + 1) : 0;
 }
 
 std::vector<std::string> Scanner::getObservablePins() const {

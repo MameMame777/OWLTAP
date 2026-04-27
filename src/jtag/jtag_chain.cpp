@@ -181,7 +181,8 @@ bool JtagChain::selectInstruction(int device_index, uint32_t instruction) {
     return tap_.shiftIR(ir_data.data(), total_ir);
 }
 
-bool JtagChain::readBSR(int device_index, std::vector<uint8_t>& bsr_data) {
+bool JtagChain::readBSR(int device_index, std::vector<uint8_t>& bsr_data,
+                         int partial_bits) {
     if (device_index < 0 || device_index >= static_cast<int>(devices_.size())) {
         last_error_ = "Invalid device index";
         return false;
@@ -193,9 +194,17 @@ bool JtagChain::readBSR(int device_index, std::vector<uint8_t>& bsr_data) {
         return false;
     }
 
-    // Calculate total DR length: target device's BSR + 1-bit BYPASS for each other device
-    int bsr_len = dev.bsdl->boundary_length;
-    int total_dr = bsr_len;
+    // Determine how many BSR bits to actually read.
+    // partial_bits == 0 means full BSR; clamp to [1, bsr_len].
+    const int bsr_len = dev.bsdl->boundary_length;
+    const int read_len = (partial_bits > 0 && partial_bits < bsr_len)
+                             ? partial_bits
+                             : bsr_len;
+
+    // Calculate total DR length: read_len bits for target + 1-bit BYPASS per
+    // other device.  (Only the low read_len bits of the BSR are shifted out;
+    // remaining cells stay in the shift path but we exit early via TMS.)
+    int total_dr = read_len;
     for (int i = 0; i < static_cast<int>(devices_.size()); i++) {
         if (i != device_index) {
             total_dr += 1;  // BYPASS register = 1 bit
@@ -208,15 +217,15 @@ bool JtagChain::readBSR(int device_index, std::vector<uint8_t>& bsr_data) {
         return false;
     }
 
-    // Extract target device's BSR from the chain
-    // Devices closer to TDO (lower index) come out first
+    // Extract target device's (partial) BSR from the chain.
+    // Devices closer to TDO (lower index) come out first.
     int skip_before = 0;
     for (int i = 0; i < device_index; i++) {
         skip_before += 1;  // BYPASS bits for devices before target
     }
 
-    bsr_data.resize((bsr_len + 7) / 8, 0);
-    for (int b = 0; b < bsr_len; b++) {
+    bsr_data.resize((read_len + 7) / 8, 0);
+    for (int b = 0; b < read_len; b++) {
         int src_bit = skip_before + b;
         if ((full_dr[src_bit / 8] >> (src_bit % 8)) & 1) {
             bsr_data[b / 8] |= (1 << (b % 8));

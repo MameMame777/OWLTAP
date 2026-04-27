@@ -40,6 +40,13 @@ void WaveformView::setData(const std::vector<std::string>& signals,
     earliest_time_ = 0.0;
     selected_signal_count_ = signals.size() + buses.size();
 
+    // Always update incremental-append state even when samples are empty,
+    // so that the next appendData() call uses the correct (new) signal list
+    // rather than an old stale one that would cause a false mismatch.
+    lane_signals_ = signals;
+    lane_bus_names_.clear();
+    for (const auto& b : buses) lane_bus_names_.push_back(b.name);
+
     if (samples.empty() || (signals.empty() && buses.empty())) return;
 
     auto t0 = samples.front().timestamp;
@@ -120,11 +127,8 @@ void WaveformView::setData(const std::vector<std::string>& signals,
         latest_time_ = lanes_[0].times.back();
     }
 
-    // Store incremental-append state.
+    // Store t0 for incremental-append (lane_signals_/lane_bus_names_ already set above).
     t0_ = samples.front().timestamp;
-    lane_signals_ = signals;
-    lane_bus_names_.clear();
-    for (const auto& b : buses) lane_bus_names_.push_back(b.name);
 }
 
 void WaveformView::clearData() {
@@ -301,6 +305,22 @@ WaveformView::DrawActions WaveformView::draw(bool can_capture, bool can_stop) {
     if (actions.fit_requested && !lanes_.empty()) {
         fit_requested_ = true;
     }
+
+    // ── Debug: show active lane names ──────────────────────────────────────
+    {
+        std::string lane_info = "Lanes[" + std::to_string(lanes_.size()) + "]: ";
+        for (size_t i = 0; i < lanes_.size(); i++) {
+            if (i) lane_info += ", ";
+            lane_info += lanes_[i].name;
+        }
+        lane_info += "  lane_signals_[" + std::to_string(lane_signals_.size()) + "]: ";
+        for (size_t i = 0; i < lane_signals_.size(); i++) {
+            if (i) lane_info += ", ";
+            lane_info += lane_signals_[i];
+        }
+        ImGui::TextDisabled("%s", lane_info.c_str());
+    }
+    // ── End debug ──────────────────────────────────────────────────────────
 
     if (lanes_.empty()) {
         const char* message = (selected_signal_count_ == 0)

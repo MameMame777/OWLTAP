@@ -52,9 +52,11 @@ public:
     // -----------------------------------------------------------------------
 
     // Start an async capture job.  Returns {"job_id": "..."}.
+    // pin_filter: only decode/serialise these pins (empty = all pins).
     nlohmann::json captureStart(int device_index, int buffer_depth,
                                 int interval_us,
                                 const std::string& trigger_mode,
+                                const std::vector<std::string>& pin_filter = {},
                                 int timeout_ms = 5000);
 
     // Cancel a running capture job.  Returns {"cancelled": true|false}.
@@ -116,6 +118,11 @@ public:
     // Execute a script on the daemon.  Returns {"ok": bool, "output": "..."}.
     nlohmann::json runScript(int device_index, const std::string& script_text,
                              int timeout_ms = 30000);
+
+    /// Program the PL from a .bit/.bin file on the daemon host.
+    /// Returns {"ok": true} on success; throws std::runtime_error on failure.
+    nlohmann::json programPl(int device_index, const std::string& bitstream_path,
+                             int timeout_ms = 120000);
 
 private:
     /// Send a JSON-RPC request and block until the matching response arrives.

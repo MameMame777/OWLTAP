@@ -482,6 +482,23 @@ int runDaemon(int argc, char* argv[]) {
                     "hardware/sample_bsr",
                     std::chrono::milliseconds{2000});
             });
+        gui_server->registerMethod("hardware/program_pl",
+            [&bridge](const nlohmann::json& params) -> nlohmann::json {
+                const int dev_idx         = params.value("device_index", 0);
+                const std::string path    = params.at("bitstream_path").get<std::string>();
+                // Timeout: bitstream can be large; allow up to 120 s.
+                return bridge.submitSync(
+                    [dev_idx, path](jtag::hardware::HardwareContext& ctx,
+                                   jtag::hardware::HardwareJob&) -> nlohmann::json {
+                        jtag::PlConfig& pl = ctx.plConfig(dev_idx);
+                        bool ok = pl.program(path);
+                        if (!ok) throw std::runtime_error(pl.lastError());
+                        return nlohmann::json{{"ok", true}};
+                    },
+                    "hardware/program_pl",
+                    std::chrono::milliseconds{120000});
+            });
+
         gui_server->registerMethod("script/run",
             [&mcp_reg](const nlohmann::json& p) {
                 return mcp_reg.callToolRaw("run_script", p);

@@ -1311,9 +1311,11 @@ void AppWindow::onStartCapture() {
             const std::string mode_str =
                 (run_mode_ == jtag::TriggerMode::SINGLE) ? "single" :
                 (run_mode_ == jtag::TriggerMode::NORMAL) ? "normal" : "free_run";
+            const auto filter_pins = SignalPanel::selectedSignals();
             auto result = gui_client_->captureStart(bsdl_device_index_,
                                                     capture_buffer_depth_,
-                                                    1000, mode_str);
+                                                    1000, mode_str,
+                                                    filter_pins);
             if (result.contains("job_id")) {
                 daemon_capture_job_id_ = result["job_id"].get<std::string>();
                 capturing_ = true;
@@ -1339,8 +1341,9 @@ void AppWindow::onStartCapture() {
     capture_engine_->setBufferDepth(static_cast<size_t>(capture_buffer_depth_));
     capture_engine_->trigger().setMode(run_mode_);
     // Apply pin filter: only decode selected pins to reduce per-sample overhead.
+    const auto filter_pins = SignalPanel::selectedSignals();
     if (scanner_) {
-        scanner_->setDecodeFilter(SignalPanel::selectedSignals());
+        scanner_->setDecodeFilter(filter_pins);
     }
     if (capture_engine_->start()) {
         capturing_ = true;
@@ -1350,7 +1353,19 @@ void AppWindow::onStartCapture() {
         last_refresh_ = std::chrono::steady_clock::now();
         syncSelectionViews(std::vector<jtag::SampleFrame>{});
         WaveformView::requestResetView();
-        setStatusMessage("Capturing...");
+        {
+            std::string pin_list;
+            for (size_t i = 0; i < filter_pins.size(); i++) {
+                if (i) pin_list += ", ";
+                pin_list += filter_pins[i];
+            }
+            const size_t actual_filter = scanner_ ? scanner_->decodeFilterSize() : 0;
+            char buf[256];
+            std::snprintf(buf, sizeof(buf),
+                          "Capturing (%zu pin(s) selected, filter=%zu): %s",
+                          filter_pins.size(), actual_filter, pin_list.c_str());
+            setStatusMessage(buf);
+        }
     } else {
         setStatusMessage("Capture error: " + capture_engine_->lastError());
     }
@@ -1384,9 +1399,11 @@ void AppWindow::onSingleCapture() {
         if (bsdl_device_index_ < 0) return;
         if (capturing_) return;
         try {
+            const auto filter_pins_daemon = SignalPanel::selectedSignals();
             auto result = gui_client_->captureStart(bsdl_device_index_,
                                                     capture_buffer_depth_,
-                                                    1000, "single");
+                                                    1000, "single",
+                                                    filter_pins_daemon);
             if (result.contains("job_id")) {
                 daemon_capture_job_id_ = result["job_id"].get<std::string>();
                 capturing_ = true;
@@ -1411,8 +1428,9 @@ void AppWindow::onSingleCapture() {
         capture_engine_->stop();
     capture_engine_->setBufferDepth(static_cast<size_t>(capture_buffer_depth_));
     capture_engine_->trigger().setMode(jtag::TriggerMode::SINGLE);
+    const auto filter_pins_s = SignalPanel::selectedSignals();
     if (scanner_) {
-        scanner_->setDecodeFilter(SignalPanel::selectedSignals());
+        scanner_->setDecodeFilter(filter_pins_s);
     }
     if (capture_engine_->start()) {
         capturing_ = true;
@@ -1422,7 +1440,17 @@ void AppWindow::onSingleCapture() {
         last_refresh_ = std::chrono::steady_clock::now();
         syncSelectionViews(std::vector<jtag::SampleFrame>{});
         WaveformView::requestResetView();
-        setStatusMessage("Single capture...");
+        {
+            std::string pin_list;
+            for (size_t i = 0; i < filter_pins_s.size(); i++) {
+                if (i) pin_list += ", ";
+                pin_list += filter_pins_s[i];
+            }
+            char buf[256];
+            std::snprintf(buf, sizeof(buf), "Single capture (%zu pin(s)): %s",
+                          filter_pins_s.size(), pin_list.c_str());
+            setStatusMessage(buf);
+        }
     }
 }
 
@@ -1579,9 +1607,14 @@ void AppWindow::refreshFromCapture() {
         // FREE_RUN without auto-scroll: waveform is frozen in view, so show
         // a live status indicator so the user knows acquisition is still running.
         char buf[128];
-        snprintf(buf, sizeof(buf), "Capturing  %zu samples  %.1f Hz",
+        const size_t n_pins_live = cached_samples_.empty()
+            ? 0 : cached_samples_.back().data.pin_states.size();
+        const size_t filter_sz = scanner_ ? scanner_->decodeFilterSize() : 0;
+        snprintf(buf, sizeof(buf),
+                 "Capturing  %zu samples  %.1f Hz  (pin_states=%zu filter=%zu)",
                  cached_samples_.size(),
-                 capture_engine_->effectiveSampleRate());
+                 capture_engine_->effectiveSampleRate(),
+                 n_pins_live, filter_sz);
         setStatusOnly(buf);
     }
 }
@@ -2350,11 +2383,6 @@ void AppWindow::buildMenuBar() {
 
 void AppWindow::onProgramPl() {
     if (!connected_) return;
-    if (gui_client_ && gui_client_->isConnected() && !chain_) {
-        setStatusMessage("PL programming not yet available in daemon mode.");
-        return;
-    }
-    if (!chain_) return;
     if (program_pl_running_.load()) return;
 
     std::string path = openFileDialog(
@@ -2378,6 +2406,37 @@ void AppWindow::onProgramPl() {
 
     setStatusMessage("Programming PL: " + path);
 
+    // Daemon path: forward to daemon via RPC (daemon reads local file).
+    if (gui_client_ && gui_client_->isConnected() && !chain_) {
+        auto client = gui_client_.get();
+        program_pl_thread_ = std::thread([this, client, path]() {
+            try {
+                auto result = client->programPl(0, path);
+                const bool ok = result.value("ok", false);
+                std::string err;
+                if (!ok) err = result.value("error", "Unknown error");
+                {
+                    std::lock_guard<std::mutex> lk(program_pl_mutex_);
+                    program_pl_error_ = err;
+                }
+                program_pl_success_.store(ok);
+            } catch (const std::exception& e) {
+                {
+                    std::lock_guard<std::mutex> lk(program_pl_mutex_);
+                    program_pl_error_ = e.what();
+                }
+                program_pl_success_.store(false);
+            }
+            program_pl_running_.store(false);
+        });
+        return;
+    }
+
+    // Direct path: use local PlConfig.
+    if (!chain_) {
+        program_pl_running_.store(false);
+        return;
+    }
     program_pl_thread_ = std::thread([this, path]() {
         // Device 0 = PL TAP (TDO-closest in Zynq JTAG chain, UG470 ordering)
         jtag::PlConfig pl(*chain_, 0);

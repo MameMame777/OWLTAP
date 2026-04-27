@@ -75,6 +75,9 @@ public:
     /// Pass empty vector to disable filtering (decode all pins, the default).
     void setDecodeFilter(const std::vector<std::string>& names);
 
+    /// Returns the number of pins currently in the decode filter (0 = no filter).
+    size_t decodeFilterSize() const { return decode_filter_.size(); }
+
     /// Get list of all observable (input) pin names.
     std::vector<std::string> getObservablePins() const;
 
@@ -92,6 +95,11 @@ private:
     int device_index_;
     std::set<std::string> decode_filter_;  // empty = decode all pins
     std::string last_error_;
+
+    /// Returns the minimum number of BSR bits that must be shifted out to cover
+    /// all cells of the pins in decode_filter_.  Returns 0 when the filter is
+    /// empty (meaning: read the full BSR).
+    int maxNeededBsrBits() const;
 };
 
 } // namespace jtag

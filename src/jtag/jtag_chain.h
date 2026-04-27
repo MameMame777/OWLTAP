@@ -53,8 +53,12 @@ public:
     /// Assumes SAMPLE instruction is already loaded.
     /// @param device_index  Target device index
     /// @param bsr_data      Output: BSR data (LSB first)
+    /// @param partial_bits  If > 0 and < full BSR length, only clock out this
+    ///                      many bits (partial read for FPS optimisation).
+    ///                      0 means read full BSR (default).
     /// @return true on success
-    bool readBSR(int device_index, std::vector<uint8_t>& bsr_data);
+    bool readBSR(int device_index, std::vector<uint8_t>& bsr_data,
+                 int partial_bits = 0);
 
     /// Write boundary scan register of a specific device.
     /// Used with EXTEST to drive pins.

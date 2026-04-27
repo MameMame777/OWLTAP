@@ -15,6 +15,7 @@ namespace {
 constexpr size_t kMaxLogEntries = 512;
 
 std::vector<std::string> entries_;
+std::string              log_text_;   // joined text for selectable display
 bool auto_scroll_ = true;
 bool scroll_to_bottom_ = false;
 
@@ -38,20 +39,21 @@ void DebugLogPanel::draw(const std::string& latest_status) {
     ImGui::Checkbox("Auto Scroll", &auto_scroll_);
     ImGui::Separator();
 
-    if (ImGui::BeginChild("##debug_log", ImVec2(0.0f, 0.0f), false,
-                          ImGuiWindowFlags_HorizontalScrollbar)) {
-        if (entries_.empty()) {
-            ImGui::TextDisabled("No log messages.");
-        } else {
-            for (const auto& entry : entries_) {
-                ImGui::TextUnformatted(entry.c_str());
-            }
-            if (auto_scroll_ && scroll_to_bottom_) {
-                ImGui::SetScrollHereY(1.0f);
-            }
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    ImGui::InputTextMultiline(
+        "##debug_log",
+        const_cast<char*>(log_text_.c_str()),
+        log_text_.size() + 1,
+        ImVec2(avail.x, avail.y),
+        ImGuiInputTextFlags_ReadOnly);
+
+    if (auto_scroll_ && scroll_to_bottom_) {
+        // Scroll the InputTextMultiline to the bottom by setting scroll on
+        // the inner child window that ImGui creates for it.
+        if (ImGui::IsItemVisible()) {
+            ImGui::SetScrollHereY(1.0f);
         }
     }
-    ImGui::EndChild();
 
     scroll_to_bottom_ = false;
     ImGui::End();
@@ -80,11 +82,19 @@ void DebugLogPanel::append(const std::string& message) {
                        entries_.begin() + (entries_.size() - kMaxLogEntries));
     }
 
+    // Rebuild joined text.
+    log_text_.clear();
+    for (const auto& e : entries_) {
+        log_text_ += e;
+        log_text_ += '\n';
+    }
+
     scroll_to_bottom_ = true;
 }
 
 void DebugLogPanel::clear() {
     entries_.clear();
+    log_text_.clear();
     scroll_to_bottom_ = false;
 }
 

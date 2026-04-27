@@ -322,6 +322,29 @@ bazelisk test //test/...
 | `//test:capture_session_test` | Capture session state machine; buffer-depth and interval accessors; trigger round-trip |
 | `//test:json_rpc_test` | JSON-RPC 2.0 framing and parsing; error/result shapes; multi-message stream |
 | `//test:tool_registry_test` | MCP tool-registry parameter validation (required fields, type checking, null params) |
+| `//test:test_suite_test` | `.suite` file parser (`parseSuiteFile`): empty/missing/comment/relative-path/inline-comment; `TestSuiteRunner::run` (missing/empty/multi scripts); `formatReport` |
+| `//test:ict_parser_test` | `.ict` file parser (`parseIctFile`): empty/missing/comment/single-net/multi-net/device-index/malformed; `runInterconnectTest` (empty netlist, null driver, out-of-range, multi-net); `formatInterconnectReport` |
+
+### Why two test layers?
+
+| Layer | When to run | What it covers | Hardware required |
+|-------|-------------|----------------|-------------------|
+| `bazel test //test/...` | Every commit, CI | Logic correctness of every module in isolation; fast (< 10 s); deterministic and hermetic | No |
+| Python HIL scripts | Before a release, after hardware changes | End-to-end path from Python → MCP → daemon → real JTAG chain; catches integration regressions that unit mocks cannot detect | Yes — FTDI adapter + target board |
+
+The unit tests use fake/stub hardware (no libftdi calls at runtime) so they run
+fast in any environment and are safe to run repeatedly in CI.  The HIL scripts
+spawn a real `jtag_daemon.exe`, perform JTAG scans against physical silicon, and
+verify observable side-effects (pin states, ILA status registers, capture
+buffers) that cannot be replicated with mocks.
+
+`.suite` and `.ict` features are tested at both layers:
+- **Unit layer** — `test_suite_test` / `ict_parser_test` verify the file-format
+  parsers and the runner logic using in-memory stubs.  These catch regressions
+  in parsing rules without requiring a board.
+- **HIL layer** — `test_hw_suite_ict.py` runs real scripts against the target,
+  verifies `run_script` round-trips, and reads back pin states through the full
+  daemon stack.
 
 ### Hardware-in-the-loop tests (FTDI adapter + target required)
 
@@ -369,6 +392,35 @@ Result: 10/10 tests passed
 [TEST] read_ila_status       → version=3  depth=1024  data_width=32  sig_count=2  armed=False
 ```
 
+#### `test_hw_suite_ict.py` — .suite / .ict feature HIL test
+
+Starts `jtag_daemon.exe` automatically, exercises the `.suite` script-runner
+and the `.ict` interconnect-test parser against real hardware (SAMPLE mode
+only — no EXTEST pin driving).
+
+```powershell
+# Defaults: xa7z020_clg484.bsd, bazel-bin\src\tools\jtag_daemon.exe
+python test_hw_suite_ict.py
+
+# Supply a custom .ict file (parsed + receiver pins observed via SAMPLE)
+python test_hw_suite_ict.py --ict path\to\board.ict
+
+# Override BSDL or daemon path:
+python test_hw_suite_ict.py --bsdl HWsample\xa7z020_clg400.bsd
+```
+
+| Test | What is verified |
+|------|------------------|
+| `.suite` parse + run | Temp `.suite` file (relative paths) is parsed; each script runs via `run_script` and returns `success=true` |
+| `.ict` parse + observe | `.ict` file (or auto-generated synthetic net) is parsed; every receiver pin is read via `read_pin`; state is `high`/`low`/`unknown` |
+
+**Hardware test result (2026-04-28, xa7z020_clg484):**
+```
+Result: 2/2 tests passed
+[TEST] .suite: parse + run_script per script file           → PASS  (3/3 scripts)
+[TEST] .ict:   parse + read_pin observation (SAMPLE mode)  → PASS
+```
+
 #### `test_mcp_live.py` — basic MCP smoke test
 
 Requires a daemon already running on port 9999.
@@ -401,6 +453,22 @@ no MCP handshake).  The port is printed by the daemon on startup.
 python test_gui_rpc_bsdl.py 54321
 python test_gui_rpc_capture.py 54321
 ```
+
+## Security
+
+`jtag_daemon` is a **local-only developer tool**.  Its MCP and GUI-RPC TCP ports
+bind exclusively to `127.0.0.1` and are never exposed on a network interface.
+
+**Known design constraints (acceptable for a local dev tool):**
+
+| Item | Detail |
+|------|--------|
+| No authentication on daemon ports | Any local process can connect and issue JTAG commands. Mitigated by loopback-only binding. Do not run the daemon on a shared machine where untrusted local users are present. |
+| `bsdl_path` / file paths are not directory-restricted | Paths supplied to `load_bsdl`, `run_script`, and related tools are passed directly to the file system. Provide only trusted, well-formed paths. |
+| `run_script` executes arbitrary script text | By design — the script DSL is the primary automation interface. Only connect trusted clients to the daemon. |
+
+**Do not** expose the daemon ports externally (e.g., via SSH port-forwarding or
+firewall rules) without adding an authentication layer.
 
 ## License
 

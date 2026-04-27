@@ -17,6 +17,7 @@
 namespace jtag::gui {
 
 bool InterconnectPanel::visible_ = true;
+bool InterconnectPanel::connect_requested_ = false;
 std::string InterconnectPanel::ict_path_;
 std::vector<jtag::NetDef> InterconnectPanel::nets_;
 std::string InterconnectPanel::load_error_;
@@ -26,6 +27,12 @@ std::string InterconnectPanel::run_error_;
 
 void InterconnectPanel::setVisible(bool visible) { visible_ = visible; }
 bool InterconnectPanel::isVisible() { return visible_; }
+
+bool InterconnectPanel::consumeConnectRequest() {
+    const bool req = connect_requested_;
+    connect_requested_ = false;
+    return req;
+}
 
 namespace {
 
@@ -157,7 +164,7 @@ void InterconnectPanel::draw(const std::vector<jtag::Scanner*>& scanners,
     if (!can_run) ImGui::EndDisabled();
     if (!connected && !nets_.empty()) {
         ImGui::SameLine();
-        ImGui::TextDisabled("(connect device first)");
+        if (ImGui::SmallButton("Connect...")) { connect_requested_ = true; }
     }
 
     if (!run_error_.empty()) {

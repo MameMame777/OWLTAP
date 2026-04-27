@@ -14,7 +14,8 @@ namespace jtag::gui {
 class SignalPanel {
 public:
     /// Draw the signal tree panel (call each frame).
-    static void draw();
+    /// connected: true when daemon/device is connected (enables Open BSDL button).
+    static void draw(bool connected = false);
 
     /// Populate from BSDL device model.
     static void populateFromBsdl(const jtag::bsdl::BSDLDevice& device);
@@ -30,6 +31,14 @@ public:
 
     /// Return and clear the pending selection-changed flag.
     static bool consumeSelectionChanged();
+
+    /// Return and clear a flag set when the user clicks "Open BSDL..." from
+    /// the empty-state panel.  app_window should call onOpenBsdl() when true.
+    static bool consumeOpenBsdlRequest();
+
+    /// Return and clear a flag set when the user clicks "Connect..." from
+    /// the empty-state panel.  app_window should open the device dialog when true.
+    static bool consumeConnectRequest();
 
     /// Restore a saved selection (call after populateFromBsdl).
     static void setSelectedSignals(const std::vector<std::string>& names);
@@ -77,6 +86,8 @@ private:
     static std::vector<PinGroup> groups_;
     static std::vector<std::string> selected_order_;
     static bool selection_changed_;
+    static bool open_bsdl_requested_;
+    static bool connect_requested_;
 
     static std::vector<BusDefinition> buses_;
     static bool bus_changed_;

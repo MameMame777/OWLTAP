@@ -24,13 +24,14 @@ bool scroll_to_bottom_ = false;
 void DebugLogPanel::draw(const std::string& latest_status) {
     ImGui::Begin("Debug Log");
 
-    if (entries_.empty()) {
+    const bool log_empty = entries_.empty();
+    if (log_empty) {
         ImGui::BeginDisabled();
     }
     if (ImGui::Button("Clear Log")) {
         clear();
     }
-    if (entries_.empty()) {
+    if (log_empty) {
         ImGui::EndDisabled();
     }
     ImGui::SameLine();

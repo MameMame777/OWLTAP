@@ -287,6 +287,8 @@ WaveformView::DrawActions WaveformView::draw(bool can_capture, bool can_stop) {
     if (!can_capture) {
         ImGui::EndDisabled();
     }
+    ImGui::SameLine();
+    actions.trigger_requested = ImGui::Button("Trigger...");
 
     // Capturing indicator (FREE_RUN without auto-scroll: view is frozen but
     // acquisition is still live, so show a visible in-panel animation).
@@ -331,15 +333,6 @@ WaveformView::DrawActions WaveformView::draw(bool can_capture, bool can_stop) {
         return actions;
     }
 
-    // ── Sweep controls ─────────────────────────────────────────────
-    ImGui::Checkbox("Auto Scroll", &auto_scroll_);
-    if (auto_scroll_) {
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(120);
-        float win_ms = static_cast<float>(window_us_ / 1000.0);
-        if (ImGui::DragFloat("Window (ms)", &win_ms, 0.5f, 1.0f, 60000.0f, "%.1f ms"))
-            window_us_ = win_ms * 1000.0;
-    }
     ImGui::Separator();
 
     ImVec2 avail = ImGui::GetContentRegionAvail();

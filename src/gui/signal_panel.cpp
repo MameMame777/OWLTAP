@@ -14,6 +14,8 @@ namespace jtag::gui {
 std::vector<SignalPanel::PinGroup> SignalPanel::groups_;
 std::vector<std::string> SignalPanel::selected_order_;
 bool SignalPanel::selection_changed_ = false;
+bool SignalPanel::open_bsdl_requested_ = false;
+bool SignalPanel::connect_requested_   = false;
 
 std::vector<BusDefinition> SignalPanel::buses_;
 bool SignalPanel::bus_changed_ = false;
@@ -244,6 +246,18 @@ bool SignalPanel::consumeSelectionChanged() {
     return changed;
 }
 
+bool SignalPanel::consumeOpenBsdlRequest() {
+    const bool req = open_bsdl_requested_;
+    open_bsdl_requested_ = false;
+    return req;
+}
+
+bool SignalPanel::consumeConnectRequest() {
+    const bool req = connect_requested_;
+    connect_requested_ = false;
+    return req;
+}
+
 std::vector<std::string> SignalPanel::selectedSignals() {
     return selected_order_;
 }
@@ -304,11 +318,25 @@ void SignalPanel::setXdcAliases(const jtag::xdc::PinAliasMap& aliases) {
     }
 }
 
-void SignalPanel::draw() {
+void SignalPanel::draw(bool connected) {
     ImGui::Begin("Signals");
 
     if (groups_.empty()) {
-        ImGui::TextDisabled("Load a BSDL file to see signals.");
+        ImGui::TextDisabled("No BSDL loaded.");
+        ImGui::Spacing();
+        // Step 1: Connect
+        if (connected) { ImGui::BeginDisabled(); }
+        if (ImGui::Button("Connect...")) {
+            connect_requested_ = true;
+        }
+        if (connected) { ImGui::EndDisabled(); }
+        ImGui::SameLine();
+        // Step 2: Open BSDL (only after connected)
+        if (!connected) { ImGui::BeginDisabled(); }
+        if (ImGui::Button("Open BSDL...")) {
+            open_bsdl_requested_ = true;
+        }
+        if (!connected) { ImGui::EndDisabled(); }
         ImGui::End();
         return;
     }

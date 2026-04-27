@@ -409,7 +409,13 @@ void AppWindow::run() {
         buildDockspace();
 
         // Panels
-        SignalPanel::draw();
+        SignalPanel::draw(connected_);
+        if (SignalPanel::consumeConnectRequest()) {
+            show_device_dialog_ = true;
+        }
+        if (SignalPanel::consumeOpenBsdlRequest()) {
+            onOpenBsdl();
+        }
         if (SignalPanel::consumeSelectionChanged() ||
             SignalPanel::consumeBusChanged()) {
             syncSelectionViews(cached_samples_);
@@ -437,6 +443,9 @@ void AppWindow::run() {
         if (waveform_actions.fit_requested) {
             onFitWaveforms();
         }
+        if (waveform_actions.trigger_requested) {
+            show_trigger_dialog_ = true;
+        }
         HexPanel::draw();
 
         // Protocol panel
@@ -450,6 +459,9 @@ void AppWindow::run() {
         drawPinControlPanel();
         drawScriptRunnerPanel();
         drawInterconnectPanel();
+        if (InterconnectPanel::consumeConnectRequest()) {
+            show_device_dialog_ = true;
+        }
         ila_panel_.draw();
         drainDaemonLog();
         DebugLogPanel::draw(status_text_);
@@ -947,7 +959,9 @@ void AppWindow::drawPinControlPanel() {
     // ── Daemon mode: limited read-only view ──────────────────────────────────
     if (gui_client_ && gui_client_->isConnected() && !scanner_) {
         if (bsdl_device_index_ < 0) {
-            ImGui::TextDisabled("Load a BSDL file to enable pin readback.");
+            ImGui::TextDisabled("No BSDL loaded.");
+            ImGui::Spacing();
+            if (ImGui::Button("Open BSDL...")) { onOpenBsdl(); }
             ImGui::End();
             return;
         }
@@ -979,7 +993,15 @@ void AppWindow::drawPinControlPanel() {
     }
 
     if (!scanner_ || !pin_driver_) {
-        ImGui::TextDisabled("Load a BSDL file to enable EXTEST pin control.");
+        ImGui::TextDisabled(connected_ ? "No BSDL loaded." : "Not connected.");
+        ImGui::Spacing();
+        if (connected_) { ImGui::BeginDisabled(); }
+        if (ImGui::Button("Connect...##pinctrl")) { show_device_dialog_ = true; }
+        if (connected_) { ImGui::EndDisabled(); }
+        ImGui::SameLine();
+        if (!connected_) { ImGui::BeginDisabled(); }
+        if (ImGui::Button("Open BSDL...##pinctrl")) { onOpenBsdl(); }
+        if (!connected_) { ImGui::EndDisabled(); }
         ImGui::End();
         return;
     }
@@ -1217,8 +1239,17 @@ void AppWindow::drawScriptRunnerPanel() {
     }
 
     if (!can_run_script) {
-        ImGui::TextDisabled(
-            "Load a BSDL and stop capture before running scripts.");
+        ImGui::TextDisabled("Not connected or no BSDL loaded.");
+        ImGui::Spacing();
+        if (connected_) { ImGui::BeginDisabled(); }
+        if (ImGui::Button("Connect...##script")) { show_device_dialog_ = true; }
+        if (connected_) { ImGui::EndDisabled(); }
+        ImGui::SameLine();
+        const bool bsdl_ok = bsdl_device_index_ >= 0 ||
+                             (scanner_ != nullptr && pin_driver_ != nullptr);
+        if (!connected_ || bsdl_ok) { ImGui::BeginDisabled(); }
+        if (ImGui::Button("Open BSDL...##script")) { onOpenBsdl(); }
+        if (!connected_ || bsdl_ok) { ImGui::EndDisabled(); }
     } else if (!daemon_mode && !pin_driver_->extestAllowed()) {
         ImGui::TextColored(
             ImVec4(1.0f, 0.55f, 0.35f, 1.0f),
@@ -2045,7 +2076,7 @@ void AppWindow::drawHelpWindow() {
         "Script Runner",
         "Test Suite",
         "Interconnect Test",
-        "PL Programming",
+        "Programming",
     };
     static const char* kContent[] = {
         // 0: Quick Start
@@ -2166,9 +2197,9 @@ void AppWindow::drawHelpWindow() {
         "     expand a row to see the drive-0 and drive-1 observed values.\n"
         "  6. Click 'Export Report...' to save a text report.\n",
 
-        // 5: PL Programming
-        "PL PROGRAMMING\n"
-        "--------------\n"
+        // 5: Programming
+        "PROGRAMMING\n"
+        "-----------\n"
         "Programs a Xilinx FPGA PL (Programmable Logic) via JTAG.\n"
         "Supported file formats: .bit (Xilinx bitstream), .bin (raw binary).\n"
         "\n"

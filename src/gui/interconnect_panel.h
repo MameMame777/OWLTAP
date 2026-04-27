@@ -20,9 +20,11 @@ public:
 
     static void setVisible(bool visible);
     static bool isVisible();
+    static bool consumeConnectRequest();
 
 private:
     static bool visible_;
+    static bool connect_requested_;
     static std::string ict_path_;
     static std::vector<jtag::NetDef> nets_;
     static std::string load_error_;

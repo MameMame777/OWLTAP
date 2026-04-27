@@ -23,6 +23,7 @@ public:
         bool stop_requested = false;
         bool clear_requested = false;
         bool fit_requested = false;
+        bool trigger_requested = false;
     };
 
     static DrawActions draw(bool can_capture, bool can_stop);

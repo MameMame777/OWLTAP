@@ -222,24 +222,39 @@ static std::vector<jtag::SampleFrame> samplesFromJson(
 }
 
 static void syncSelectionViews(const std::vector<jtag::SampleFrame>& samples) {
-    const auto selected = SignalPanel::selectedSignals();
-    const auto& buses   = SignalPanel::buses();
+    const auto all_selected = SignalPanel::selectedSignals();
+    const auto& buses       = SignalPanel::buses();
 
-    if (selected.empty() && buses.empty()) {
+    // Only build waveform lanes for signals that were actually captured
+    // (present in pin_states of the last sample).  Signals that are checked
+    // in the panel but were not in the active capture filter produce no data,
+    // so they must not appear as flat-zero ghost lanes in the waveform.
+    // HexPanel still receives all_selected so uncaptured pins show as UNKNOWN.
+    std::vector<std::string> captured;
+    if (!samples.empty()) {
+        const auto& ps = samples.back().data.pin_states;
+        for (const auto& sig : all_selected) {
+            if (ps.count(sig)) captured.push_back(sig);
+        }
+    } else {
+        captured = all_selected;
+    }
+
+    if (captured.empty() && buses.empty()) {
         WaveformView::clearData();
         HexPanel::updateValues(
             samples.empty() ? jtag::ScanResult{} : samples.back().data,
-            selected);
+            all_selected);
         HexPanel::setBuses({});
         return;
     }
 
-    WaveformView::setData(selected, buses, samples);
+    WaveformView::setData(captured, buses, samples);
     HexPanel::setBuses(buses);
 
     if (samples.empty()) {
         WaveformView::setCursorPosition(-1);
-        HexPanel::updateValues(jtag::ScanResult{}, selected);
+        HexPanel::updateValues(jtag::ScanResult{}, all_selected);
         return;
     }
 
@@ -252,7 +267,7 @@ static void syncSelectionViews(const std::vector<jtag::SampleFrame>& samples) {
     }
     WaveformView::setCursorPosition(trigger_index);
 
-    HexPanel::updateValues(samples.back().data, selected);
+    HexPanel::updateValues(samples.back().data, all_selected);
 }
 
 // ── File dialog helpers ─────────────────────────────────────────────
@@ -1518,13 +1533,22 @@ void AppWindow::refreshFromCapture() {
 
         // Incremental append: O(new_frames * signals) instead of O(all * signals).
         // Falls back to full rebuild when signal/bus selection has changed.
-        const auto selected = SignalPanel::selectedSignals();
-        const auto& buses   = SignalPanel::buses();
-        if (!WaveformView::appendData(selected, buses, new_frames, evict_count)) {
+        // Filter to only captured signals (present in pin_states) so appendData
+        // lane_signals_ stays consistent and no ghost lanes appear.
+        const auto all_selected = SignalPanel::selectedSignals();
+        const auto& buses       = SignalPanel::buses();
+        std::vector<std::string> captured;
+        {
+            const auto& ps = cached_samples_.back().data.pin_states;
+            for (const auto& sig : all_selected) {
+                if (ps.count(sig)) captured.push_back(sig);
+            }
+        }
+        if (!WaveformView::appendData(captured, buses, new_frames, evict_count)) {
             syncSelectionViews(cached_samples_);  // selection changed: full rebuild
         } else {
             HexPanel::setBuses(buses);
-            HexPanel::updateValues(cached_samples_.back().data, selected);
+            HexPanel::updateValues(cached_samples_.back().data, all_selected);
         }
 
         if (pin_driver_ && !cached_samples_.back().data.raw_bsr.empty()) {
@@ -1541,11 +1565,13 @@ void AppWindow::refreshFromCapture() {
                    (state == jtag::CaptureState::COMPLETE &&
                     capture_engine_->trigger().mode() == jtag::TriggerMode::SINGLE);
     if (is_done && capturing_) {
-        capture_engine_->stop();  // transition COMPLETE → STOPPED (no-op if already STOPPED)
+        capture_engine_->stop();  // transition COMPLETE -> STOPPED (no-op if already STOPPED)
         capturing_ = false;
         char buf[128];
-        snprintf(buf, sizeof(buf), "Capture complete. %zu samples. %.1f Hz.",
-                 cached_samples_.size(), capture_engine_->effectiveSampleRate());
+        const size_t n_pins = cached_samples_.empty()
+            ? 0 : cached_samples_.back().data.pin_states.size();
+        snprintf(buf, sizeof(buf), "Capture complete. %zu samples. %.1f Hz. (%zu pin(s)).",
+                 cached_samples_.size(), capture_engine_->effectiveSampleRate(), n_pins);
         setStatusMessage(buf);
     } else if (capturing_ &&
                capture_engine_->trigger().mode() == jtag::TriggerMode::FREE_RUN &&

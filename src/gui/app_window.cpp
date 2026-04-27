@@ -1457,14 +1457,10 @@ void AppWindow::refreshFromCapture() {
                         }
                     }
                     if (progress.contains("count")) {
-                        static const char* kDots[] = {".", "..", "...", "...."};
-                        static int dot_idx = 0;
-                        dot_idx = (dot_idx + 1) % 4;
                         char buf[128];
                         snprintf(buf, sizeof(buf),
-                                 "Capturing  %d samples (daemon) %s",
-                                 progress["count"].get<int>(),
-                                 kDots[dot_idx]);
+                                 "Capturing  %d samples (daemon)",
+                                 progress["count"].get<int>());
                         setStatusOnly(buf);
                     }
                 }
@@ -1512,14 +1508,10 @@ void AppWindow::refreshFromCapture() {
                !WaveformView::isAutoScroll()) {
         // FREE_RUN without auto-scroll: waveform is frozen in view, so show
         // a live status indicator so the user knows acquisition is still running.
-        static const char* kDots[] = { ".", "..", "...", "...." };
-        static int dot_idx = 0;
-        dot_idx = (dot_idx + 1) % 4;
         char buf[128];
-        snprintf(buf, sizeof(buf), "Capturing  %zu samples  %.1f Hz %s",
+        snprintf(buf, sizeof(buf), "Capturing  %zu samples  %.1f Hz",
                  samples.size(),
-                 capture_engine_->effectiveSampleRate(),
-                 kDots[dot_idx]);
+                 capture_engine_->effectiveSampleRate());
         setStatusOnly(buf);
     }
 }

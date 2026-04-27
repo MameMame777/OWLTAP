@@ -2224,47 +2224,6 @@ void AppWindow::buildMenuBar() {
             if (ImGui::MenuItem("Reset Layout")) {
                 reset_layout_requested_ = true;
             }
-            ImGui::Separator();
-            if (ImGui::BeginMenu("Daemon")) {
-                // -- Daemon section --
-                const DaemonStatus ds = daemon_ctrl_->status();
-                const char* state_label =
-                    ds.state == DaemonState::kOff      ? "Daemon: Off" :
-                    ds.state == DaemonState::kStarting ? "Daemon: Starting..." :
-                    ds.state == DaemonState::kRunning  ? "Daemon: Running" :
-                    ds.state == DaemonState::kStopping ? "Daemon: Stopping..." :
-                                                         "Daemon: Error";
-                ImGui::TextDisabled("%s", state_label);
-                if (!ds.error_message.empty()) {
-                    ImGui::TextDisabled("  %s", ds.error_message.c_str());
-                }
-                ImGui::TextDisabled("MCP: use CLI --mcp-port <port>");
-                const bool daemon_off =
-                    (ds.state == DaemonState::kOff || ds.state == DaemonState::kError);
-                const bool daemon_active =
-                    (ds.state == DaemonState::kStarting ||
-                     ds.state == DaemonState::kRunning);
-                if (ImGui::MenuItem("Start Daemon", nullptr, false, daemon_off)) {
-                    onDaemonStart();
-                }
-                if (ImGui::MenuItem("Stop Daemon", nullptr, false, daemon_active)) {
-                    onDaemonStop();
-                }
-                // Phase 3: Connect GUI RPC client when daemon is running with gui_port.
-                const bool can_connect_rpc =
-                    (ds.state == DaemonState::kRunning && ds.gui_port != 0 &&
-                     !daemon_connect_running_.load(std::memory_order_relaxed));
-                if (ImGui::MenuItem("Connect (via Daemon)", nullptr, false, can_connect_rpc)) {
-                    onDaemonConnect();
-                }
-                const bool can_detect =
-                    gui_client_->isConnected() &&
-                    !daemon_connect_running_.load(std::memory_order_relaxed);
-                if (ImGui::MenuItem("Detect Devices (via Daemon)", nullptr, false, can_detect)) {
-                    onDaemonDetectDevices();
-                }
-                ImGui::EndMenu();
-            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Test")) {

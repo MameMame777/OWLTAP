@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/icon.png" alt="OwlTAP" width="160"/>
+  <img src="docs/icon.png" alt="OWLTAP" width="160"/>
 </p>
 
-<h1 align="center">OwlTAP</h1>
+<h1 align="center">OWLTAP</h1>
 
 <p align="center">
   A desktop JTAG boundary-scan diagnostic and waveform capture tool for FPGA/SoC devices,
@@ -10,9 +10,14 @@
 </p>
 
 ---
-O:OpenSource
-W:Waveform
-L:Logger
+
+
+**O:OpenSource**
+
+**W:Waveform**
+
+**L:Logger**
+
 
 <p align="center">
   <img src="docs/GUI.png" alt="GUI panel" width="800"/><br/>

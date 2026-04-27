@@ -2213,10 +2213,6 @@ void AppWindow::buildMenuBar() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
-            if (ImGui::MenuItem("Protocol Analyzer", nullptr,
-                                ProtocolPanel::isVisible())) {
-                ProtocolPanel::setVisible(!ProtocolPanel::isVisible());
-            }
             if (ImGui::MenuItem("Interconnect Test", nullptr,
                                 InterconnectPanel::isVisible())) {
                 InterconnectPanel::setVisible(!InterconnectPanel::isVisible());

@@ -18,12 +18,7 @@
 
 **L:Logger**
 
-
-<p align="center">
-  <img src="docs/GUI.png" alt="GUI panel" width="800"/><br/>
-  <em>GUI panel</em>
-</p>
-
+<img width="1907" height="959" alt="image" src="https://github.com/user-attachments/assets/534f3ce8-d21d-4b17-a0a0-e3eb1c77ff4b" />
 
 OWLTAP is a desktop application for interfacing with the JTAG TAP of an FPGA or SoC device, providing boundary-scan control, signal capture, and waveform visualization.
 

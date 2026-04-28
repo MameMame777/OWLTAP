@@ -211,6 +211,7 @@ OwlTAP は [src/ila/](src/ila/) 経由で ILA を JTAG 制御します（デー�
 ## 接続とデバイス選択
 
 FTDI アダプタをターゲットボードの JTAG ヘッダに接続し、接続ダイアログでデバイスを選択します。
+実機確認ではUSBケーブル＋FTDIを使用しています。
 
 <p align="center">
   <img src="docs/FTDIconnection.png" alt="FTDI 接続ダイアログ" width="480"/><br/>

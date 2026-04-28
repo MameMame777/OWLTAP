@@ -226,6 +226,7 @@ and load them at runtime via **Device → Load BSDL**.
 ## Usage
 
 1. Connect the FTDI adapter to the target board's JTAG header.
+   or connect via USB cable.
 2. Run `owltap.exe`.
 3. **Device** → **Connect**: select VID/PID/serial and channel; click Connect.
 4. **Device** → **Load BSDL**: choose the `.bsd` / `.bsdl` file for your target.

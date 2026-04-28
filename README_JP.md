@@ -281,23 +281,6 @@ bazel-bin/src/tools/pl_program.exe --bit design.bit
 
 > **注意**: この機能はユニットテスト済みですが、**実機での動作確認はまだ行っていません**。
 
-BSCAN SPI ブリッジ経由で SPI Config ROM（MT25QL128）に書き込みます。電源断後も設定が保持されます。
-
-手順:
-1. Vivado で生の SPI イメージを生成します:
-   ```tcl
-   write_cfgmem -force -format BIN -interface SPIx1 -size 16 \
-                -loadbit "up 0x00000000 design.bit" design.bin
-   ```
-2. [quartiq/bscan_spi_bitstreams](https://github.com/quartiq/bscan_spi_bitstreams) から XC7Z020 用ブリッジビットストリーム (`bscan_spi_xc7z020.bit`) をダウンロードします。詳細: [assets/README.md](assets/README.md)
-3. **Tools → Program Flash (SPI ROM)...** でブリッジ `.bit` を先に選択し、次に書き込み `.bin` を選択します。
-
-コマンドライン等価:
-
-```
-bazel-bin/src/tools/flash_program.exe --bridge bscan_spi_xc7z020.bit --bin design.bin
-```
-
 対応フラッシュ: MT25QL128 のみ（JEDEC `0x20BA18`, 16 MB）。
 
 ---

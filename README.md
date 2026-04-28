@@ -293,32 +293,7 @@ bazel-bin/src/tools/pl_program.exe --bit design.bit
 
 ### Programming the SPI configuration ROM (non-volatile)
 
-**Tools → Program Flash (SPI ROM)...** writes a flash image into the Micron
-MT25QL128 so the board boots the design after power-cycle.  The workflow:
-
-1. Generate a raw SPI image from Vivado:
-
-   ```tcl
-   write_cfgmem -force -format BIN -interface SPIx1 -size 16 \
-                -loadbit "up 0x00000000 design.bit" design.bin
-   ```
-
-2. Download the BSCAN SPI bridge bitstream from
-   [quartiq/bscan_spi_bitstreams](https://github.com/quartiq/bscan_spi_bitstreams)
-   — for XC7Z020 use `bscan_spi_xc7z020.bit`.  See [assets/README.md](assets/README.md).
-
-3. In the GUI, select **Tools → Program Flash (SPI ROM)...**, pick the bridge
-   `.bit` first, then your design `.bin`.  The tool loads the bridge into the
-   PL, bulk-erases the flash, programs it page-by-page, and verifies the
-   read-back.
-
-Command-line equivalent:
-
-```
-bazel-bin/src/tools/flash_program.exe --bridge bscan_spi_xc7z020.bit --bin design.bin
-```
-
-Only MT25QL128 (JEDEC `0x20BA18`, 16 MB) is currently supported.
+> **Note**: This feature is unit-tested but **has not yet been verified on real hardware**.
 
 ## Project Structure
 

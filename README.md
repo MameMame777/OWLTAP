@@ -9,6 +9,10 @@
   built with FTDI MPSSE, Dear ImGui, and ImPlot.
 </p>
 
+<p align="center">
+  <a href="README.md">English</a> | <a href="README_JP.md">日本語</a>
+</p>
+
 ---
 
 

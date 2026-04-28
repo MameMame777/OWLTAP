@@ -94,7 +94,24 @@ module BSCANE2 #(
     logic [5:0]  ir_reg;    // active IR (latched at Update-IR)
     logic [5:0]  ir_shift;  // shift register for IR scan
 
-    localparam logic [5:0] USER1_OPCODE = 6'h02;
+    // ------------------------------------------------------------------
+    // USER opcode for the selected scan chain (Xilinx 7-series IR = 6 bits).
+    //   JTAG_CHAIN 1 = USER1 (6'h02)
+    //   JTAG_CHAIN 2 = USER2 (6'h03)
+    //   JTAG_CHAIN 3 = USER3 (6'h22)
+    //   JTAG_CHAIN 4 = USER4 (6'h23)
+    // ------------------------------------------------------------------
+    function automatic logic [5:0] user_opcode(input int chain);
+        case (chain)
+            1:       return 6'h02;
+            2:       return 6'h03;
+            3:       return 6'h22;
+            4:       return 6'h23;
+            default: return 6'h02;
+        endcase
+    endfunction
+
+    localparam logic [5:0] USER_OPCODE = user_opcode(JTAG_CHAIN);
 
     // ------------------------------------------------------------------
     // TAP state machine
@@ -142,9 +159,9 @@ module BSCANE2 #(
     end
 
     // ------------------------------------------------------------------
-    // USER1 selection gate
+    // USERn selection gate
     // ------------------------------------------------------------------
-    wire user1_active = (ir_reg == USER1_OPCODE);
+    wire user1_active = (ir_reg == USER_OPCODE);
 
     // ------------------------------------------------------------------
     // BSCANE2 output ports

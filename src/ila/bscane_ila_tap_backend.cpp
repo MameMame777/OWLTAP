@@ -8,14 +8,19 @@
 
 namespace jtag::ila {
 
-BscaneIlaTapBackend::BscaneIlaTapBackend(JtagChain& chain, int pl_tap_index)
-    : chain_(chain), pl_tap_index_(pl_tap_index) {}
+BscaneIlaTapBackend::BscaneIlaTapBackend(JtagChain& chain, int pl_tap_index,
+                                          int user_chain)
+    : chain_(chain)
+    , pl_tap_index_(pl_tap_index)
+    , user_chain_(user_chain < 1 || user_chain > 4 ? 1 : user_chain) {}
 
 bool BscaneIlaTapBackend::selectIr(uint32_t opcode) {
     pending_ir_ = opcode & 0x1Fu;
-    // Activate BSCANE2 USER1 scan chain on the PL TAP.
-    if (!chain_.selectInstruction(pl_tap_index_, kUser1Opcode)) {
-        last_error_ = "USER1 selectInstruction failed: " + chain_.lastError();
+    // Activate the selected BSCANE2 USERn scan chain on the PL TAP.
+    const uint32_t user_ir = kUserOpcodes[user_chain_];
+    if (!chain_.selectInstruction(pl_tap_index_, user_ir)) {
+        last_error_ = "USER" + std::to_string(user_chain_) +
+                      " selectInstruction failed: " + chain_.lastError();
         return false;
     }
     return true;

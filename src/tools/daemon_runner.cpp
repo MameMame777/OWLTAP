@@ -261,14 +261,15 @@ int runDaemon(int argc, char* argv[]) {
             });
         gui_server->registerMethod("ila/status",
             [&bridge](const nlohmann::json& params) -> nlohmann::json {
-                const int dev_idx    = params.value("device_index", 0);
+                const int dev_idx     = params.value("device_index", 0);
                 const bool use_bscane = params.value("use_bscane", false);
+                const int user_chain  = params.value("user_chain", 1);
                 return bridge.submitSync(
-                    [dev_idx, use_bscane](jtag::hardware::HardwareContext& ctx,
+                    [dev_idx, use_bscane, user_chain](jtag::hardware::HardwareContext& ctx,
                                           jtag::hardware::HardwareJob&) -> nlohmann::json {
                         std::unique_ptr<jtag::ila::IlaTapBackend> be;
                         if (use_bscane)
-                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx);
+                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx, user_chain);
                         else
                             be = std::make_unique<jtag::ila::ChainIlaTapBackend>(ctx.chain(), dev_idx);
                         jtag::ila::IlaDriver drv(*be);
@@ -287,18 +288,29 @@ int runDaemon(int argc, char* argv[]) {
             [&bridge](const nlohmann::json& params) -> nlohmann::json {
                 const int dev_idx     = params.value("device_index", 0);
                 const bool use_bscane = params.value("use_bscane", false);
+                const int user_chain  = params.value("user_chain", 1);
                 return bridge.submitSync(
-                    [dev_idx, use_bscane](jtag::hardware::HardwareContext& ctx,
+                    [dev_idx, use_bscane, user_chain](jtag::hardware::HardwareContext& ctx,
                                           jtag::hardware::HardwareJob&) -> nlohmann::json {
                         std::unique_ptr<jtag::ila::IlaTapBackend> be;
                         if (use_bscane)
-                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx);
+                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx, user_chain);
                         else
                             be = std::make_unique<jtag::ila::ChainIlaTapBackend>(ctx.chain(), dev_idx);
                         jtag::ila::IlaDriver drv(*be);
                         jtag::ila::IlaCaps caps{};
-                        if (!drv.probe(caps))
+                        if (!drv.probe(caps)) {
+                            std::fprintf(stderr,
+                                "[ila/probe] FAIL dev=%d bscane=%d chain=%d: %s\n",
+                                dev_idx, (int)use_bscane, user_chain,
+                                drv.lastError().c_str());
                             throw std::runtime_error(drv.lastError());
+                        }
+                        std::fprintf(stderr,
+                            "[ila/probe] OK dev=%d chain=%d "
+                            "raw=0x%08X idcode=0x%08X depth=%u\n",
+                            dev_idx, user_chain,
+                            caps.raw, caps.idcode, caps.depth);
                         nlohmann::json r{
                             {"version",   caps.version},
                             {"num_ch",    caps.num_ch},
@@ -306,7 +318,8 @@ int runDaemon(int argc, char* argv[]) {
                             {"data_w",    caps.data_w},
                             {"addr_w",    caps.addr_w},
                             {"depth",     caps.depth},
-                            {"raw",       caps.raw}};
+                            {"raw",       caps.raw},
+                            {"idcode",    caps.idcode}};
                         if (caps.sig_count > 0) {
                             std::vector<jtag::ila::IlaSignalEntry> entries;
                             if (drv.readSignalDefs(entries)) {
@@ -329,6 +342,7 @@ int runDaemon(int argc, char* argv[]) {
             [&bridge](const nlohmann::json& params) -> nlohmann::json {
                 const int dev_idx     = params.value("device_index", 0);
                 const bool use_bscane = params.value("use_bscane", false);
+                const int user_chain  = params.value("user_chain", 1);
                 const uint32_t mask   = params.value("mask", 0u);
                 const uint32_t value  = params.value("value", 0u);
                 const uint32_t rise   = params.value("rise_mask", 0u);
@@ -338,13 +352,13 @@ int runDaemon(int argc, char* argv[]) {
                 const bool or_mode    = params.value("or_mode", false);
                 const uint16_t pre    = static_cast<uint16_t>(params.value("pre_samples", 256));
                 return bridge.submitSync(
-                    [dev_idx, use_bscane, mask, value, rise, fall,
+                    [dev_idx, use_bscane, user_chain, mask, value, rise, fall,
                      mask2, val2, or_mode, pre](
                         jtag::hardware::HardwareContext& ctx,
                         jtag::hardware::HardwareJob&) -> nlohmann::json {
                         std::unique_ptr<jtag::ila::IlaTapBackend> be;
                         if (use_bscane)
-                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx);
+                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx, user_chain);
                         else
                             be = std::make_unique<jtag::ila::ChainIlaTapBackend>(ctx.chain(), dev_idx);
                         jtag::ila::IlaDriver drv(*be);
@@ -363,12 +377,13 @@ int runDaemon(int argc, char* argv[]) {
             [&bridge](const nlohmann::json& params) -> nlohmann::json {
                 const int dev_idx     = params.value("device_index", 0);
                 const bool use_bscane = params.value("use_bscane", false);
+                const int user_chain  = params.value("user_chain", 1);
                 return bridge.submitSync(
-                    [dev_idx, use_bscane](jtag::hardware::HardwareContext& ctx,
+                    [dev_idx, use_bscane, user_chain](jtag::hardware::HardwareContext& ctx,
                                           jtag::hardware::HardwareJob&) -> nlohmann::json {
                         std::unique_ptr<jtag::ila::IlaTapBackend> be;
                         if (use_bscane)
-                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx);
+                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx, user_chain);
                         else
                             be = std::make_unique<jtag::ila::ChainIlaTapBackend>(ctx.chain(), dev_idx);
                         jtag::ila::IlaDriver drv(*be);
@@ -383,12 +398,13 @@ int runDaemon(int argc, char* argv[]) {
             [&bridge](const nlohmann::json& params) -> nlohmann::json {
                 const int dev_idx     = params.value("device_index", 0);
                 const bool use_bscane = params.value("use_bscane", false);
+                const int user_chain  = params.value("user_chain", 1);
                 return bridge.submitSync(
-                    [dev_idx, use_bscane](jtag::hardware::HardwareContext& ctx,
+                    [dev_idx, use_bscane, user_chain](jtag::hardware::HardwareContext& ctx,
                                           jtag::hardware::HardwareJob&) -> nlohmann::json {
                         std::unique_ptr<jtag::ila::IlaTapBackend> be;
                         if (use_bscane)
-                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx);
+                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx, user_chain);
                         else
                             be = std::make_unique<jtag::ila::ChainIlaTapBackend>(ctx.chain(), dev_idx);
                         jtag::ila::IlaDriver drv(*be);
@@ -403,12 +419,13 @@ int runDaemon(int argc, char* argv[]) {
             [&bridge](const nlohmann::json& params) -> nlohmann::json {
                 const int dev_idx     = params.value("device_index", 0);
                 const bool use_bscane = params.value("use_bscane", false);
+                const int user_chain  = params.value("user_chain", 1);
                 return bridge.submitSync(
-                    [dev_idx, use_bscane](jtag::hardware::HardwareContext& ctx,
+                    [dev_idx, use_bscane, user_chain](jtag::hardware::HardwareContext& ctx,
                                           jtag::hardware::HardwareJob&) -> nlohmann::json {
                         std::unique_ptr<jtag::ila::IlaTapBackend> be;
                         if (use_bscane)
-                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx);
+                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx, user_chain);
                         else
                             be = std::make_unique<jtag::ila::ChainIlaTapBackend>(ctx.chain(), dev_idx);
                         jtag::ila::IlaDriver drv(*be);
@@ -423,12 +440,13 @@ int runDaemon(int argc, char* argv[]) {
             [&bridge](const nlohmann::json& params) -> nlohmann::json {
                 const int dev_idx     = params.value("device_index", 0);
                 const bool use_bscane = params.value("use_bscane", false);
+                const int user_chain  = params.value("user_chain", 1);
                 return bridge.submitSync(
-                    [dev_idx, use_bscane](jtag::hardware::HardwareContext& ctx,
+                    [dev_idx, use_bscane, user_chain](jtag::hardware::HardwareContext& ctx,
                                           jtag::hardware::HardwareJob&) -> nlohmann::json {
                         std::unique_ptr<jtag::ila::IlaTapBackend> be;
                         if (use_bscane)
-                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx);
+                            be = std::make_unique<jtag::ila::BscaneIlaTapBackend>(ctx.chain(), dev_idx, user_chain);
                         else
                             be = std::make_unique<jtag::ila::ChainIlaTapBackend>(ctx.chain(), dev_idx);
                         jtag::ila::IlaDriver drv(*be);

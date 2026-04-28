@@ -86,13 +86,16 @@ public:
     void setChain(jtag::JtagChain* chain, int device_index);
 
     /// Attach the chain for a BSCANE2-based ILA (`BscaneIlaTapBackend`).
-    void setBscaneChain(jtag::JtagChain* chain, int pl_tap_index);
+    /// @param user_chain  1=USER1, 2=USER2, 3=USER3, 4=USER4 (default 1).
+    void setBscaneChain(jtag::JtagChain* chain, int pl_tap_index,
+                        int user_chain = 1);
 
     /// Attach a daemon client for daemon-mode ILA access.
     /// Pass nullptr to detach and fall back to direct mode.
     /// use_bscane=true selects BscaneIlaTapBackend on the daemon side.
+    /// user_chain: BSCANE2 chain 1..4 (USER1..USER4), default 1.
     void setDaemonClient(GuiDaemonClient* client, int device_index,
-                         bool use_bscane = false);
+                         bool use_bscane = false, int user_chain = 1);
 
     /// Optional external callback that also receives samples after a read.
     void setSampleCallback(SampleCallback cb) { sample_cb_ = std::move(cb); }
@@ -126,6 +129,7 @@ private:
     void doForce();
     void doReset();
     void doRead();
+    void pollCaps();    ///< Re-probe ILA caps via daemon RPC (daemon mode only)
     void pollStatus();
     void drawWaveform();      // multi-lane ImPlot chart
     void drawSignalEditor();   // collapsible lane-definition table
@@ -154,6 +158,7 @@ private:
     GuiDaemonClient*        daemon_client_       = nullptr;
     int                     daemon_device_index_ = 0;
     bool                    daemon_use_bscane_   = false;
+    int                     daemon_user_chain_   = 1;  ///< BSCANE2 chain 1..4
     jtag::ila::IlaCaps      caps_remote_{};   ///< caps received via ila/probe RPC
 
     // Trigger config UI state

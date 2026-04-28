@@ -47,9 +47,8 @@ bool IlaDriver::probe(IlaCaps& out) {
     // Reading IDCODE (sub-opcode 0x01) serves as a reliable single-scan
     // warm-up because stored_ir resets to 0x01, so no prime scan is needed.
     // This makes the subsequent CONFIG scan (2 scans: prime + real) reliable.
-    // Also provides diagnostic info for error messages if CONFIG read fails.
-    uint32_t idcode = 0;
-    (void)readIdcode(idcode);  // warm-up scan; result used only in error messages
+    uint32_t _warmup_idcode = 0;
+    (void)readIdcode(_warmup_idcode);  // warm-up scan; result may be unreliable
 
     if (!backend_.selectIr(kIrConfig)) {
         last_error_ = backend_.lastError();
@@ -74,11 +73,17 @@ bool IlaDriver::probe(IlaCaps& out) {
         // Unsupported / absent CONFIG register — keep compile-time defaults.
         char buf[96];
         snprintf(buf, sizeof(buf),
-                 "ILA CONFIG not supported (raw=0x%08X idcode=0x%08X)", raw, idcode);
+                 "ILA CONFIG not supported (raw=0x%08X)", raw);
         last_error_ = buf;
         out = caps_;  // unchanged
         return false;
     }
+
+    // Read IDCODE after the hardware is fully warmed up (reliable at this point).
+    uint32_t idcode = 0;
+    (void)readIdcode(idcode);
+    c.idcode = idcode;
+
     caps_ = c;
     out   = c;
     return true;

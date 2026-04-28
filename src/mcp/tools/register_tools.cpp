@@ -599,19 +599,23 @@ void registerHardwareTools(ToolRegistry& registry, ExecutorBridge& bridge) {
                 {"device_index", {{"type", "integer"}}},
                 {"use_bscane",   {{"type", "boolean"},
                                    {"description",
-                                    "true = access ILA via BSCANE2 TAP (default false)"}}}
+                                    "true = access ILA via BSCANE2 TAP (default false)"}}},
+                {"user_chain",   {{"type", "integer"},
+                                   {"description",
+                                    "BSCANE2 chain index 1..4 (USER1..USER4, default 1)"}}}
             }}
         },
         [&bridge](nlohmann::json params) -> nlohmann::json {
-            int  dev_idx   = params["device_index"].get<int>();
+            int  dev_idx    = params["device_index"].get<int>();
             bool use_bscane = params.value("use_bscane", false);
+            int  user_chain = params.value("user_chain", 1);
             return bridge.submitSync(
-                [dev_idx, use_bscane](hardware::HardwareContext& ctx,
+                [dev_idx, use_bscane, user_chain](hardware::HardwareContext& ctx,
                           hardware::HardwareJob& /*job*/) -> nlohmann::json {
                     std::unique_ptr<ila::IlaTapBackend> backend;
                     if (use_bscane)
                         backend = std::make_unique<ila::BscaneIlaTapBackend>(
-                                      ctx.chain(), dev_idx);
+                                      ctx.chain(), dev_idx, user_chain);
                     else
                         backend = std::make_unique<ila::ChainIlaTapBackend>(
                                       ctx.chain(), dev_idx);
@@ -690,6 +694,9 @@ void registerHardwareTools(ToolRegistry& registry, ExecutorBridge& bridge) {
                 {"use_bscane",   {{"type", "boolean"},
                                    {"description",
                                     "true = access ILA via BSCANE2 TAP (default false)"}}},
+                {"user_chain",   {{"type", "integer"},
+                                   {"description",
+                                    "BSCANE2 chain index 1..4 (USER1..USER4, default 1)"}}},
                 {"force",        {{"type", "boolean"},
                                    {"description",
                                     "true = force-trigger immediately after arm (default true)"}}},
@@ -704,19 +711,20 @@ void registerHardwareTools(ToolRegistry& registry, ExecutorBridge& bridge) {
         [&bridge](nlohmann::json params) -> nlohmann::json {
             int  dev_idx    = params["device_index"].get<int>();
             bool use_bscane = params.value("use_bscane",  false);
+            int  user_chain = params.value("user_chain",  1);
             bool force      = params.value("force",       true);
             int  pre        = params.value("pre_samples", 0);
             int  timeout_ms = params.value("timeout_ms",  5000);
 
             return bridge.submitSync(
-                [dev_idx, use_bscane, force, pre, timeout_ms](
+                [dev_idx, use_bscane, user_chain, force, pre, timeout_ms](
                     hardware::HardwareContext& ctx,
                     hardware::HardwareJob& /*job*/) -> nlohmann::json {
 
                     std::unique_ptr<ila::IlaTapBackend> backend;
                     if (use_bscane)
                         backend = std::make_unique<ila::BscaneIlaTapBackend>(
-                                      ctx.chain(), dev_idx);
+                                      ctx.chain(), dev_idx, user_chain);
                     else
                         backend = std::make_unique<ila::ChainIlaTapBackend>(
                                       ctx.chain(), dev_idx);

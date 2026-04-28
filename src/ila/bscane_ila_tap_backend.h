@@ -11,10 +11,13 @@ namespace jtag { class JtagChain; }
 
 namespace jtag::ila {
 
-/// IlaTapBackend that routes through BSCANE2 USER1 on the Xilinx PL TAP.
+/// IlaTapBackend that routes through a BSCANE2 USERn scan chain on the
+/// Xilinx PL TAP (7-series / Zynq).  Use with ila_bscane2_top.sv.
+/// No additional JTAG cable is needed; the FPGA's built-in USB JTAG
+/// (e.g. FT2232H on Zybo Z7) is sufficient.
 ///
-/// Use with ila_bscane2_top.sv. No additional JTAG cable needed; the FPGA's
-/// built-in USB JTAG (e.g. FT2232H on Zybo Z7) is sufficient.
+/// Up to four independent instances can coexist in one design.  Pass
+/// @p user_chain = 1..4 to select USER1..USER4 respectively.
 ///
 /// Protocol: every JTAG transaction is a single 37-bit DR scan through the
 /// PL TAP's USER1 scan chain:
@@ -33,27 +36,39 @@ namespace jtag::ila {
 ///   active opcode; second scan captures register value during CAPTURE-DR).
 ///
 /// Typical usage:
-///   BscaneIlaTapBackend be(chain, pl_tap_idx);
+///   BscaneIlaTapBackend be(chain, pl_tap_idx);          // USER1 (default)
+///   BscaneIlaTapBackend be(chain, pl_tap_idx, 2);        // USER2
 ///   IlaDriver drv(be);
-///   drv.arm();          // issues USER1 + CTRL scan internally
+///   drv.arm();          // issues USERn + CTRL scan internally
 ///
 /// @note  pl_tap_index is the ChainDevice index of the Zynq PL Config TAP,
 ///        which is typically index 1 in a Zynq chain (PS ARM DAP = 0).
 class BscaneIlaTapBackend : public IlaTapBackend {
 public:
-    explicit BscaneIlaTapBackend(JtagChain& chain, int pl_tap_index);
+    /// @param user_chain  BSCANE2 scan-chain index: 1=USER1, 2=USER2,
+    ///                    3=USER3, 4=USER4.  Defaults to 1.
+    explicit BscaneIlaTapBackend(JtagChain& chain, int pl_tap_index,
+                                  int user_chain = 1);
 
     bool selectIr(uint32_t opcode) override;
     bool shiftDr(int dr_bits, const uint8_t* tdi,
                   std::vector<uint8_t>& tdo) override;
     const std::string& lastError() const override { return last_error_; }
 
-    /// USER1 instruction opcode for Xilinx 7-series / Zynq PL TAP (IR=6 bits).
-    static constexpr uint32_t kUser1Opcode = 0x02u;
+    /// Xilinx 7-series / Zynq PL TAP USER instruction opcodes (IR = 6 bits).
+    /// Index matches JTAG_CHAIN parameter (1..4).
+    static constexpr uint32_t kUserOpcodes[5] = {
+        0x00u,  // [0] unused
+        0x02u,  // [1] USER1
+        0x03u,  // [2] USER2
+        0x22u,  // [3] USER3
+        0x23u,  // [4] USER4
+    };
 
 private:
     JtagChain&  chain_;
     int         pl_tap_index_;
+    int         user_chain_;             // 1..4 (BSCANE2 JTAG_CHAIN value)
     uint32_t    pending_ir_       = 0x01u;  // opcode to embed in next frame
     // Initialize to 0xFF (impossible opcode) so the very first selectIr/shiftDr
     // always triggers a prime scan regardless of the opcode.  This means the

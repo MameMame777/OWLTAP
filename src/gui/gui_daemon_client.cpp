@@ -442,9 +442,10 @@ nlohmann::json GuiDaemonClient::jobPoll(const std::string& job_id,
 }
 
 nlohmann::json GuiDaemonClient::ilaStatus(int device_index, bool use_bscane,
-                                           int timeout_ms) {
+                                           int user_chain, int timeout_ms) {
     return call("ila/status",
-                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                {{"device_index", device_index}, {"use_bscane", use_bscane},
+                 {"user_chain", user_chain}},
                 timeout_ms);
 }
 
@@ -453,13 +454,15 @@ nlohmann::json GuiDaemonClient::ilaStatus(int device_index, bool use_bscane,
 // ---------------------------------------------------------------------------
 
 nlohmann::json GuiDaemonClient::ilaProbe(int device_index, bool use_bscane,
-                                          int timeout_ms) {
+                                          int user_chain, int timeout_ms) {
     return call("ila/probe",
-                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                {{"device_index", device_index}, {"use_bscane", use_bscane},
+                 {"user_chain", user_chain}},
                 timeout_ms);
 }
 
 nlohmann::json GuiDaemonClient::ilaArm(int device_index, bool use_bscane,
+                                        int user_chain,
                                         uint32_t mask, uint32_t value,
                                         uint32_t rise_mask, uint32_t fall_mask,
                                         uint32_t mask2, uint32_t val2,
@@ -467,6 +470,7 @@ nlohmann::json GuiDaemonClient::ilaArm(int device_index, bool use_bscane,
                                         int timeout_ms) {
     return call("ila/arm",
                 {{"device_index", device_index}, {"use_bscane", use_bscane},
+                 {"user_chain", user_chain},
                  {"mask",  mask},  {"value",     value},
                  {"rise_mask", rise_mask}, {"fall_mask", fall_mask},
                  {"mask2", mask2}, {"val2",      val2},
@@ -475,30 +479,34 @@ nlohmann::json GuiDaemonClient::ilaArm(int device_index, bool use_bscane,
 }
 
 nlohmann::json GuiDaemonClient::ilaStop(int device_index, bool use_bscane,
-                                         int timeout_ms) {
+                                         int user_chain, int timeout_ms) {
     return call("ila/stop",
-                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                {{"device_index", device_index}, {"use_bscane", use_bscane},
+                 {"user_chain", user_chain}},
                 timeout_ms);
 }
 
 nlohmann::json GuiDaemonClient::ilaForce(int device_index, bool use_bscane,
-                                          int timeout_ms) {
+                                          int user_chain, int timeout_ms) {
     return call("ila/force_trigger",
-                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                {{"device_index", device_index}, {"use_bscane", use_bscane},
+                 {"user_chain", user_chain}},
                 timeout_ms);
 }
 
 nlohmann::json GuiDaemonClient::ilaReset(int device_index, bool use_bscane,
-                                          int timeout_ms) {
+                                          int user_chain, int timeout_ms) {
     return call("ila/reset",
-                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                {{"device_index", device_index}, {"use_bscane", use_bscane},
+                 {"user_chain", user_chain}},
                 timeout_ms);
 }
 
 nlohmann::json GuiDaemonClient::ilaReadSamples(int device_index, bool use_bscane,
-                                                int timeout_ms) {
+                                                int user_chain, int timeout_ms) {
     return call("ila/read_samples",
-                {{"device_index", device_index}, {"use_bscane", use_bscane}},
+                {{"device_index", device_index}, {"use_bscane", use_bscane},
+                 {"user_chain", user_chain}},
                 timeout_ms);
 }
 

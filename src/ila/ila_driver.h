@@ -51,6 +51,7 @@ struct IlaCaps {
     uint8_t  addr_w    = 10;
     uint32_t depth     = 1024;
     uint32_t raw       = 0;
+    uint32_t idcode    = 0;  ///< value read via IR_IDCODE during probe()
     bool     probed    = false;
 };
 

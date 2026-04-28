@@ -2,9 +2,11 @@
 // OwlTAP ILA -- BSCANE2-based access port (Xilinx 7-series / Zynq)
 `timescale 1ns/1ps
 //
-// Replaces the dedicated TAP in ila_top with BSCANE2 USER1, allowing the
+// Replaces the dedicated TAP in ila_top with BSCANE2 USERn, allowing the
 // ILA to be accessed via the FPGA's built-in USB JTAG port (FT2232H on
 // Zybo Z7, Digilent JTAG-HS2, etc.) with no extra pins or cables.
+// Up to four independent instances can coexist in one design by assigning
+// each a unique JTAG_CHAIN value (1..4 → USER1..USER4).
 //
 // ---------------------------------------------------------------------------
 // 37-bit DR frame protocol (BSCANE2 USER1 scan chain)
@@ -51,6 +53,9 @@
 `default_nettype none
 
 module ila_bscane2_top #(
+    // BSCANE2 scan-chain selector (1..4 → USER1..USER4).
+    // Each instance in the same design MUST use a unique value.
+    parameter int JTAG_CHAIN = 1,
     parameter int DATA_W    = 32,
     parameter int DEPTH     = 1024,
     parameter int ADDR_W    = 10,
@@ -81,13 +86,13 @@ module ila_bscane2_top #(
 );
 
     // ------------------------------------------------------------------
-    // BSCANE2 -- USER1 scan chain
+    // BSCANE2 -- USERn scan chain (JTAG_CHAIN selects USER1..USER4)
     // ------------------------------------------------------------------
     wire  bscan_tck, bscan_tdi;
     logic bscan_tdo;
     wire  bscan_shift, bscan_capture, bscan_update, bscan_reset;
 
-    BSCANE2 #(.JTAG_CHAIN(1)) u_bscan (
+    BSCANE2 #(.JTAG_CHAIN(JTAG_CHAIN)) u_bscan (
         .TCK     (bscan_tck),
         .TDI     (bscan_tdi),
         .TDO     (bscan_tdo),

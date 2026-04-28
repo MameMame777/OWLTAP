@@ -71,9 +71,10 @@ public:
     nlohmann::json jobPoll(const std::string& job_id, int timeout_ms = 2000);
 
     // Read ILA status registers from the daemon.
-    // use_bscane=true → BscaneIlaTapBackend (Zynq PL Config TAP via USER1).
+    // use_bscane=true → BscaneIlaTapBackend (Zynq PL Config TAP via USERn).
+    // user_chain: BSCANE2 chain index 1..4 (USER1..USER4, default 1).
     nlohmann::json ilaStatus(int device_index, bool use_bscane = false,
-                             int timeout_ms = 5000);
+                             int user_chain = 1, int timeout_ms = 5000);
 
     // -----------------------------------------------------------------------
     // Phase 5+: ILA high-level daemon operations.
@@ -81,10 +82,11 @@ public:
 
     /// Probe ILA and return caps + optional signal_defs array.
     nlohmann::json ilaProbe(int device_index, bool use_bscane = false,
-                            int timeout_ms = 5000);
+                            int user_chain = 1, int timeout_ms = 5000);
 
     /// Configure trigger registers and arm the ILA.
     nlohmann::json ilaArm(int device_index, bool use_bscane,
+                          int user_chain,
                           uint32_t mask, uint32_t value,
                           uint32_t rise_mask, uint32_t fall_mask,
                           uint32_t mask2, uint32_t val2,
@@ -93,19 +95,19 @@ public:
 
     /// Stop (disarm) the ILA.
     nlohmann::json ilaStop(int device_index, bool use_bscane = false,
-                           int timeout_ms = 3000);
+                           int user_chain = 1, int timeout_ms = 3000);
 
     /// Force an immediate trigger.
     nlohmann::json ilaForce(int device_index, bool use_bscane = false,
-                            int timeout_ms = 3000);
+                            int user_chain = 1, int timeout_ms = 3000);
 
     /// Reset the capture buffer.
     nlohmann::json ilaReset(int device_index, bool use_bscane = false,
-                            int timeout_ms = 3000);
+                            int user_chain = 1, int timeout_ms = 3000);
 
     /// Read sample data.  Returns {ok, samples:[...], data_w:N}.
     nlohmann::json ilaReadSamples(int device_index, bool use_bscane = false,
-                                  int timeout_ms = 10000);
+                                  int user_chain = 1, int timeout_ms = 10000);
 
     // -----------------------------------------------------------------------
     // Phase 5: BSR sample-all and script execution.

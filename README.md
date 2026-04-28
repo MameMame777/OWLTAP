@@ -60,21 +60,34 @@ Verified hardware: Xilinx Zynq XA7Z020-CLG484 PL TAP + ARM DAP via FTDI FT4232H.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────┐
-│          Qt6 GUI (ImGui/ImPlot)     │  ← app_window, signal_panel, waveform_view
-├─────────────────────────────────────┤
-│  Boundary Scan: Scanner / PinDriver │  ← BSR staging, EXTEST, capture decoding
-│  Capture Engine + Trigger           │  ← ring buffer, edge/level trigger
-├─────────────────────────────────────┤
-│  JTAG Chain + BSDL Parser           │  ← device enumeration, pin mapping
-├─────────────────────────────────────┤
-│  TAP Controller  (IEEE 1149.1 FSM)  │  ← TMS path generation
-├─────────────────────────────────────┤
-│  MPSSE Command Buffer               │  ← FTDI protocol encoding
-├─────────────────────────────────────┤
-│  FtdiDevice  (libftdi1)             │  ← USB bulk transfer
-└─────────────────────────────────────┘
+The GUI and hardware are separated by the **jtag_daemon process**; the GUI communicates with the daemon over JSON-RPC TCP.  This allows MCP clients (AI) and external scripts to use the same hardware operations.
+
+```mermaid
+flowchart TB
+  GUI["ImGui / ImPlot GUI\napp_window / signal_panel / waveform_view"]
+  MCP["MCP Client (Claude, etc.)"]
+
+  subgraph DAEMON["jtag_daemon process"]
+    subgraph L2["Boundary Scan / Capture Layer"]
+      direction TB
+      BS["Boundary Scan: Scanner / PinDriver\nBSR staging / EXTEST / decode"]
+      CAP["Capture Engine + Trigger\nring buffer / edge & level trigger"]
+    end
+
+    CHAIN["JTAG Chain + BSDL Parser\ndevice enumeration / pin mapping"]
+    TAP["TAP Controller (Test Access Port)\nIEEE 1149.1 FSM / TMS generation"]
+    MPSSE["MPSSE Command Buffer\nFTDI protocol encoding"]
+    FTDI["FtdiDevice\nlibftdi1 / USB bulk transfer"]
+
+    BS --> CHAIN
+    CAP --> CHAIN
+    CHAIN --> TAP
+    TAP --> MPSSE
+    MPSSE --> FTDI
+  end
+
+  GUI -->|"JSON-RPC TCP"| DAEMON
+  MCP -->|"JSON-RPC TCP"| DAEMON
 ```
 
 ## Embedded ILA IP
@@ -318,9 +331,11 @@ src/
   flash/           -- SPI config ROM programming via BSCAN bridge
   ftdi/            -- libftdi1 wrapper (FtdiDevice) + MPSSE buffer
   gui/             -- ImGui application window, panels, dialogs
+  ila/             -- ILA driver (dedicated TAP and BSCANE2 backends)
   jtag/            -- JtagChain + TAP controller FSM
+  mcp/             -- MCP server and tool registry
   script/          -- ScriptEngine (set/expect/apply/highz)
-  tools/           -- jtag_diag, pl_program, flash_program CLI tools
+  tools/           -- jtag_diag, pl_program, flash_program, jtag_daemon CLI tools
 test/              -- Google Test unit tests (no hardware required)
 third_party/       -- vendored libftdi1, libusb-1.0, GLFW, ImGui, ImPlot
 docs/              -- architecture references, implementation plans

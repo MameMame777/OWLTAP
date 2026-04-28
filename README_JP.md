@@ -133,6 +133,23 @@ Zynq XA7Z020 の BSR は 1077 ビットあります。これを JTAG でシフ�
 
 `DATA_W`（デフォルト 32 bit）と `DEPTH`（デフォルト 1024 サンプル）はパラメータで変更可能です。
 
+### ILA 詳細
+
+| 項目 | 内容 |
+|------|------|
+| RTL ロケーション | [hdl/ila/rtl/](hdl/ila/rtl/) |
+| トップレベルバリアント | `ila_top`（専用 TAP） / `ila_bscane2_top`（Xilinx `BSCANE2 USER1`） |
+| キャプチャ幅 | `DATA_W` パラメータ（デフォルト `32` bit） |
+| キャプチャ深度 | `DEPTH` パラメータ（デフォルト `1024` サンプル; `DEPTH = 1 << ADDR_W`） |
+| トリガエンジン | グループ A: レベル（マスク/値）＋エッジ（立上/立下マスク）; グループ B: レベル; `TRIG_CTRL.or_mode` で AND/OR 合成 |
+| プレ/ポストトリガ | `PRE_SAMPLES` レジスタ（デフォルト `DEPTH/4`） |
+| IR 長（専用 TAP） | 5 bit |
+| ストレージ | シンプルデュアルポート BRAM（`ram_style = "block"`）。書き込み @ `sample_clk`、読み出し @ `tck` / `bscan_tck` |
+| CDC | 制御パルス: トグルパルス同期; 準静的設定/ステータス: 2-FF `ASYNC_REG` 同期 |
+| IDCODE | `32'hA17A_0001`（開発用プレースホルダ — 配布前に上書きすること） |
+| リファレンスデザイン | [hdl/ila/examples/zybo_z7020/](hdl/ila/examples/zybo_z7020/)（Zybo Z7-20 ブリングアップ; `ila_bringup_top.bit` で検証済み） |
+| ドキュメント | [hdl/ila/doc/integration.md](hdl/ila/doc/integration.md)、[hdl/ila/rtl/rtl_spec.md](hdl/ila/rtl/rtl_spec.md) |
+
 ### バリアント
 
 | バリアント | 説明 |
@@ -151,19 +168,30 @@ Zynq XA7Z020 の BSR は 1077 ビットあります。これを JTAG でシフ�
 | オペコード | 名前 | DR 幅 | アクセス | 説明 |
 |-----------|------|-------|---------|------|
 | `5'h01` | `IDCODE` | 32 | R | JTAG IDCODE (TLR 後のデフォルト) |
-| `5'h02` | `CONFIG` | 32 | R | `{version, num_ch, sig_count, data_w-1, rsvd, addr_w}` |
+| `5'h02` | `CONFIG` | 32 | R | `{version[7:0], num_ch[3:0], sig_count[3:0], data_w-1[5:0], rsvd[1:0], addr_w[7:0]}`; 現在 `VERSION = 8'h03` |
 | `5'h03` | `SIG_DEF` | 32 | R | 信号定義 ROM ワード（自動インクリメント） |
 | `5'h08` | `CTRL` | 4 | W | Bit0=ARM, Bit1=STOP, Bit2=RESET, Bit3=FORCE_TRIG |
 | `5'h09` | `STATUS` | 8 | R | `{5'b0, full, triggered, armed}` |
 | `5'h0A/0B` | `TRIG_MASK/VAL` | `DATA_W` | R/W | グループ A レベル比較 |
 | `5'h0F/10` | `TRIG_RISE/FALL` | `DATA_W` | R/W | グループ A エッジマスク |
 | `5'h11/12` | `TRIG_MASK2/VAL2` | `DATA_W` | R/W | グループ B レベル比較 |
+| `5'h13` | `TRIG_CTRL` | `DATA_W` | R/W | Bit0 = `or_mode`（グループ A OR B） |
 | `5'h0C` | `READ_ADDR` | `ADDR_W` | R/W | BRAM 読み出しポインタ |
 | `5'h0D` | `READ_DATA` | `DATA_W` | R | キャプチャワード（Update-DR で自動インクリメント） |
 | `5'h0E` | `PRE_SAMPLES` | 16 | R/W | プレトリガサンプル数 |
 | `5'h1F` | `BYPASS` | 1 | — | IEEE 1149.1 必須 BYPASS |
 
-詳細: [hdl/ila/doc/integration.md](hdl/ila/doc/integration.md)、[hdl/ila/rtl/rtl_spec.md](hdl/ila/rtl/rtl_spec.md)
+### 推奨アクセスシーケンス
+
+1. TMS=1 を ≥5 TCK 印加してテストロジックリセットし、`IDCODE` を読み取る。
+2. `CONFIG` / `SIG_DEF` を読み取り、深度・幅・信号レイアウトをランタイムで検出する。
+3. `TRIG_MASK` / `TRIG_VAL`（およびオプションで `TRIG_RISE` / `TRIG_FALL` / グループ B / `TRIG_CTRL`）と `PRE_SAMPLES` を設定する。
+4. `CTRL = 4'b0001`（ARM）を発行し、`STATUS` の `full == 1` をポーリングする。`CTRL = 4'b1000` で強制トリガ、`CTRL = 4'b0010` で早期停止。
+5. `READ_ADDR = (trigger_addr - pre_samples) mod DEPTH` をセットし、`READ_DATA` を `DEPTH` 回シフトしてバッファを読み出す。
+
+### ソフトウェア側
+
+OwlTAP は [src/ila/](src/ila/) 経由で ILA を JTAG 制御します（デーモンは `ila_top` バックエンドと `BSCANE2` バックエンドの両方を公開）。MCP ツール `read_ila_status` はライブの `CONFIG` / `STATUS` レジスタ内容（バージョン・深度・データ幅・信号数・armed/triggered/full フラグ）を返します。GUI の ILA パネルはコアを ARM してステータスをポーリングし、キャプチャサンプルを波形ビューに読み出します。
 
 ### ILA ジェネレータ ウィザード
 
@@ -175,6 +203,8 @@ Zynq XA7Z020 の BSR は 1077 ビットあります。これを JTAG でシフ�
 | Vivado ヘルパースクリプト | `create_project.tcl` / `build_bitstream.tcl` |
 | 制約ファイル | `ila_generated.xdc`（サンプルクロック制約付き） |
 | パッケージ README | パラメータ・レーンマップ・Vivado バッチ使用法のサマリ |
+
+> **注記**: デフォルトの `IDCODE_VAL = 32'hA17A_0001` は開発用プレースホルダです。ハードウェアを配布する前に、メーカー割り当ての正規 32-bit IDCODE を設定するか、ボードブリングアップノートに競合を記録してください。
 
 ---
 
@@ -239,6 +269,12 @@ apply
 
 **Tools → Program Bitstream...** で `.bit` / `.bin` ファイルを JTAG 経由で Zynq PL に直接書き込みます（UG470 設定シーケンス: `JPROGRAM` → `CFG_IN` → `JSTART` → `DONE`）。電源断で消えるため、反復デバッグに便利です。MCP 経由（`program_bitstream`）でも呼び出せます。
 
+コマンドライン等価:
+
+```
+bazel-bin/src/tools/pl_program.exe --bit design.bit
+```
+
 ---
 
 ## SPI フラッシュ書き込み（不揮発）
@@ -255,6 +291,12 @@ BSCAN SPI ブリッジ経由で SPI Config ROM（MT25QL128）に書き込みま�
    ```
 2. [quartiq/bscan_spi_bitstreams](https://github.com/quartiq/bscan_spi_bitstreams) から XC7Z020 用ブリッジビットストリーム (`bscan_spi_xc7z020.bit`) をダウンロードします。詳細: [assets/README.md](assets/README.md)
 3. **Tools → Program Flash (SPI ROM)...** でブリッジ `.bit` を先に選択し、次に書き込み `.bin` を選択します。
+
+コマンドライン等価:
+
+```
+bazel-bin/src/tools/flash_program.exe --bridge bscan_spi_xc7z020.bit --bin design.bin
+```
 
 対応フラッシュ: MT25QL128 のみ（JEDEC `0x20BA18`, 16 MB）。
 

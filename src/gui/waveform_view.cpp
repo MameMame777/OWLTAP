@@ -262,8 +262,6 @@ WaveformView::DrawActions WaveformView::draw(bool can_capture, bool can_stop) {
         ImGui::BeginDisabled();
     }
     actions.run_requested = ImGui::Button("Run");
-    ImGui::SameLine();
-    actions.single_requested = ImGui::Button("Single");
     if (!can_capture) {
         ImGui::EndDisabled();
     }

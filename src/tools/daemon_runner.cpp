@@ -479,8 +479,13 @@ int runDaemon(int argc, char* argv[]) {
                             else if (state == jtag::PinState::LOW) s = "low";
                             pins[name] = s;
                         }
+                        nlohmann::json raw_bsr = nlohmann::json::array();
+                        for (uint8_t byte : result.raw_bsr) {
+                            raw_bsr.push_back(byte);
+                        }
                         return nlohmann::json{{"device_index", dev_idx},
-                                              {"pins", pins}};
+                                              {"pins", pins},
+                                              {"raw_bsr", raw_bsr}};
                     },
                     "hardware/sample_bsr",
                     std::chrono::milliseconds{2000});

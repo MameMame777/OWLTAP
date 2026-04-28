@@ -327,7 +327,8 @@ void IlaGeneratorDialog::draw(bool* p_open, AppConfig* config) {
                     } else {
                         persistToConfig(config);
                         error_message_.clear();
-                        success_message_ = "Generated 5 files under " + files.output_dir.generic_string();
+                        success_message_ = "Generated " + std::to_string(files.written_paths.size()) +
+                                           " files under " + files.output_dir.generic_string();
                         pending_status_message_ = success_message_;
                     }
                 }

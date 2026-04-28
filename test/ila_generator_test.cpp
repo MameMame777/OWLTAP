@@ -17,6 +17,9 @@ public:
         path_ = base / std::filesystem::path("owltap_ila_generator_test_" + std::to_string(std::rand()));
         std::filesystem::create_directories(path_ / "hdl" / "ila" / "rtl");
         std::ofstream(path_ / "hdl" / "ila" / "rtl" / "ila_bscane2_top.sv") << "module ila_bscane2_top; endmodule\n";
+        std::ofstream(path_ / "hdl" / "ila" / "rtl" / "ila_trigger.sv") << "module ila_trigger; endmodule\n";
+        std::ofstream(path_ / "hdl" / "ila" / "rtl" / "ila_capture_fsm.sv") << "module ila_capture_fsm; endmodule\n";
+        std::ofstream(path_ / "hdl" / "ila" / "rtl" / "ila_bram.sv") << "module ila_bram; endmodule\n";
     }
 
     ~TempRepoRoot() {
@@ -91,11 +94,15 @@ TEST(IlaGeneratorTest, RenderGeneratesExpectedStrings) {
     EXPECT_NE(files.wrapper_sv.find(".SIG_COUNT (2)"), std::string::npos);
     EXPECT_NE(files.wrapper_sv.find("8'd31, 8'd15"), std::string::npos);
     EXPECT_NE(files.wrapper_sv.find("4'd0, 4'd2"), std::string::npos);
-    EXPECT_NE(files.create_project_tcl.find("hdl ila rtl"), std::string::npos);
+    EXPECT_NE(files.create_project_tcl.find("ila_bscane2_top.sv"), std::string::npos);
+    EXPECT_EQ(files.create_project_tcl.find("hdl ila rtl"), std::string::npos);
     EXPECT_EQ(files.create_project_tcl.find(repo_root.path().string()), std::string::npos);
     EXPECT_NE(files.build_bitstream_tcl.find("source create_project.tcl"), std::string::npos);
+    EXPECT_NE(files.build_bitstream_tcl.find("if {[get_property PROGRESS [get_runs synth_1]] != \"100%\"} {"), std::string::npos);
+    EXPECT_NE(files.build_bitstream_tcl.find("if {[get_property PROGRESS [get_runs impl_1]] != \"100%\"} {"), std::string::npos);
     EXPECT_NE(files.xdc.find("create_clock"), std::string::npos);
     EXPECT_NE(files.readme_md.find("upper_half"), std::string::npos);
+    EXPECT_NE(files.readme_md.find("ila_bscane2_top.sv"), std::string::npos);
 }
 
 TEST(IlaGeneratorTest, WriteCreatesExpectedFiles) {
@@ -105,12 +112,14 @@ TEST(IlaGeneratorTest, WriteCreatesExpectedFiles) {
     std::string error;
 
     ASSERT_TRUE(writeIlaGeneratedFiles(config, repo_root.path(), files, error)) << error;
-    ASSERT_EQ(files.written_paths.size(), 5u);
+    ASSERT_EQ(files.written_paths.size(), 9u);
     for (const auto& path : files.written_paths) {
         EXPECT_TRUE(std::filesystem::exists(path)) << path.string();
     }
     EXPECT_TRUE(std::filesystem::exists(files.output_dir / "ila_demo_top.sv"));
     EXPECT_TRUE(std::filesystem::exists(files.output_dir / "create_project.tcl"));
+    EXPECT_TRUE(std::filesystem::exists(files.output_dir / "ila_bscane2_top.sv"));
+    EXPECT_TRUE(std::filesystem::exists(files.output_dir / "ila_trigger.sv"));
 }
 
 TEST(IlaGeneratorTest, ValidateRejectsOutOfRangeLane) {

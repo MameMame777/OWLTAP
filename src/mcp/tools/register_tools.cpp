@@ -48,6 +48,14 @@ static nlohmann::json scanResultToJson(const ScanResult& r) {
     return j;
 }
 
+static nlohmann::json rawBsrToJson(const std::vector<uint8_t>& raw_bsr) {
+    nlohmann::json arr = nlohmann::json::array();
+    for (uint8_t byte : raw_bsr) {
+        arr.push_back(byte);
+    }
+    return arr;
+}
+
 static nlohmann::json samplesToJson(const std::vector<SampleFrame>& frames) {
     nlohmann::json arr = nlohmann::json::array();
     for (const auto& f : frames) {
@@ -58,6 +66,7 @@ static nlohmann::json samplesToJson(const std::vector<SampleFrame>& frames) {
                 .count());
         s["trigger_point"] = f.trigger_point;
         s["pins"] = scanResultToJson(f.data);
+            s["raw_bsr"] = rawBsrToJson(f.data.raw_bsr);
         arr.push_back(std::move(s));
     }
     return arr;

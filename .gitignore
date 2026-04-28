@@ -54,3 +54,18 @@ HWsample/
 # Test output artifacts
 *_stderr.txt
 *_stdout.txt
+hdl/ila/generated/ila_generated/build_bitstream.tcl
+hdl/ila/generated/ila_generated/create_project.tcl
+hdl/ila/generated/ila_generated/ila_bram.sv
+hdl/ila/generated/ila_generated/ila_bscane2_top.sv
+hdl/ila/generated/ila_generated/ila_capture_fsm.sv
+hdl/ila/generated/ila_generated/ila_generated_top.sv
+hdl/ila/generated/ila_generated/ila_generated.xdc
+hdl/ila/generated/ila_generated/ila_trigger.sv
+hdl/ila/generated/ila_generated/README.md
+hdl/ila/examples/zybo_z7020_generated/build_bitstream.tcl
+hdl/ila/examples/zybo_z7020_generated/create_project.tcl
+hdl/ila/examples/zybo_z7020_generated/ila_generated_bringup_top.sv
+hdl/ila/examples/zybo_z7020_generated/ila_generated_bringup.xdc
+hdl/ila/examples/zybo_z7020_generated/program_board.tcl
+hdl/ila/examples/zybo_z7020_generated/README.md

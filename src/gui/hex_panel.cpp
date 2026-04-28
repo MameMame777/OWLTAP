@@ -31,7 +31,8 @@ void HexPanel::setXdcAliases(const jtag::xdc::PinAliasMap& aliases) {
     xdc_aliases_ = aliases;
 }
 
-void HexPanel::draw() {
+HexPanel::DrawActions HexPanel::draw(bool can_capture) {
+    DrawActions actions;
     ImGui::Begin("Bus Values");
 
     // Format selector
@@ -39,6 +40,14 @@ void HexPanel::draw() {
     int fmt_idx = static_cast<int>(format_);
     if (ImGui::Combo("Format", &fmt_idx, formats, 4)) {
         format_ = static_cast<DisplayFormat>(fmt_idx);
+    }
+    ImGui::SameLine();
+    if (!can_capture) {
+        ImGui::BeginDisabled();
+    }
+    actions.single_requested = ImGui::Button("SingleCapture");
+    if (!can_capture) {
+        ImGui::EndDisabled();
     }
 
     ImGui::Separator();
@@ -173,6 +182,7 @@ void HexPanel::draw() {
     }
 
     ImGui::End();
+    return actions;
 }
 
 } // namespace jtag::gui

@@ -192,7 +192,8 @@ private:
 // Convert a JSON samples array (from daemon captureGetSamples) to SampleFrame
 // vector.  The JSON format matches samplesToJson() in register_tools.cpp:
 //   [{ "timestamp_us": <int64>, "trigger_point": bool,
-//      "pins": { "PIN_NAME": "high"|"low"|"unknown" } }]
+//      "pins": { "PIN_NAME": "high"|"low"|"unknown" },
+//      "raw_bsr": [byte0, byte1, ...] }]
 static std::vector<jtag::SampleFrame> samplesFromJson(
     const nlohmann::json& arr) {
     std::vector<jtag::SampleFrame> frames;
@@ -215,6 +216,13 @@ static std::vector<jtag::SampleFrame> samplesFromJson(
                     else if (v == "low")  state = jtag::PinState::LOW;
                 }
                 f.data.pin_states[it.key()] = state;
+            }
+        }
+        if (s.contains("raw_bsr") && s["raw_bsr"].is_array()) {
+            for (const auto& byte : s["raw_bsr"]) {
+                if (byte.is_number_unsigned() || byte.is_number_integer()) {
+                    f.data.raw_bsr.push_back(static_cast<uint8_t>(byte.get<int>()));
+                }
             }
         }
         frames.push_back(std::move(f));
@@ -432,9 +440,6 @@ void AppWindow::run() {
         if (waveform_actions.run_requested) {
             onStartCapture();
         }
-        if (waveform_actions.single_requested) {
-            onSingleCapture();
-        }
         if (waveform_actions.stop_requested) {
             onStopCapture();
         }
@@ -447,7 +452,10 @@ void AppWindow::run() {
         if (waveform_actions.trigger_requested) {
             show_trigger_dialog_ = true;
         }
-        HexPanel::draw();
+        const auto hex_actions = HexPanel::draw(can_capture);
+        if (hex_actions.single_requested) {
+            onSingleCapture();
+        }
 
         // Protocol panel
         {
@@ -912,6 +920,16 @@ bool AppWindow::refreshPinReadback(bool report_status) {
                     else if (sv == "low") st = jtag::PinState::LOW;
                     pin_readback_.pin_states[it.key()] = st;
                 }
+            }
+            if (result.contains("raw_bsr") && result["raw_bsr"].is_array()) {
+                for (const auto& byte : result["raw_bsr"]) {
+                    if (byte.is_number_unsigned() || byte.is_number_integer()) {
+                        pin_readback_.raw_bsr.push_back(static_cast<uint8_t>(byte.get<int>()));
+                    }
+                }
+            }
+            if (pin_driver_ && !pin_readback_.raw_bsr.empty()) {
+                pin_driver_->loadSnapshot(pin_readback_.raw_bsr);
             }
             pin_readback_error_.clear();
             extest_outputs_active_ = false;
@@ -1452,7 +1470,7 @@ void AppWindow::onSingleCapture() {
                 last_refresh_ = std::chrono::steady_clock::now();
                 syncSelectionViews(std::vector<jtag::SampleFrame>{});
                 WaveformView::requestResetView();
-                setStatusMessage("Single capture via daemon...");
+                setStatusMessage("SingleCapture via daemon...");
             } else {
                 setStatusMessage("Capture error: no job_id returned");
             }
@@ -1486,7 +1504,7 @@ void AppWindow::onSingleCapture() {
                 pin_list += filter_pins_s[i];
             }
             char buf[256];
-            std::snprintf(buf, sizeof(buf), "Single capture (%zu pin(s)): %s",
+            std::snprintf(buf, sizeof(buf), "SingleCapture (%zu pin(s)): %s",
                           filter_pins_s.size(), pin_list.c_str());
             setStatusMessage(buf);
         }
@@ -2104,7 +2122,7 @@ void AppWindow::drawHelpWindow() {
         "4. Capture\n"
         "   Capture > Run (F5) to start continuous sampling.\n"
         "   The waveform panel updates ~20 times per second.\n"
-        "   Capture > Stop (F6) to halt.  Capture > Single (F7) for one shot.\n"
+        "   Capture > Stop (F6) to halt.  Capture > SingleCapture (F7) for one shot.\n"
         "\n"
         "5. Drive outputs (EXTEST)\n"
         "   Use the Pin Control panel to set pin directions and values,\n"
@@ -2119,7 +2137,7 @@ void AppWindow::drawHelpWindow() {
         "Keyboard shortcuts:\n"
         "  F5  Run (continuous)\n"
         "  F6  Stop\n"
-        "  F7  Single shot\n"
+        "  F7  SingleCapture\n"
         "  F8  Open Trigger Setup dialog\n"
         "\n"
         "Trigger Setup (Capture > Trigger Setup... or F8):\n"
@@ -2327,7 +2345,7 @@ void AppWindow::buildMenuBar() {
             if (ImGui::MenuItem("Stop", "F6", false, capturing_)) {
                 onStopCapture();
             }
-            if (ImGui::MenuItem("Single", "F7", false, can_capture)) {
+            if (ImGui::MenuItem("SingleCapture", "F7", false, can_capture)) {
                 onSingleCapture();
             }
             ImGui::Separator();

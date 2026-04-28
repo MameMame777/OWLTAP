@@ -8,7 +8,7 @@ Version 1.
 
 ## Scope
 
-The generator currently emits a Xilinx BSCANE2-based wrapper around the existing `hdl/ila/rtl/ila_bscane2_top.sv` core.
+The generator currently emits a Xilinx BSCANE2-based wrapper and bundles the required OwlTAP RTL into the selected output directory.
 
 Supported in this version:
 - BSCANE2 only
@@ -16,25 +16,28 @@ Supported in this version:
 - `DATA_W` from 1 to 32 bits
 - `DEPTH` must be a power of two
 - Up to 15 signal lanes
-- Vivado helper output with relative-path references only
+- Self-contained Vivado helper output
 
 Not supported in this version:
 - Dedicated TAP generation
 - `DATA_W > 32`
 - Auto-import from XDC/CSV
-- Self-contained RTL export outside the repository structure
+- Repository-independent generated package export
 
 ## Generated file set
 
 The generator writes the following files into the selected output directory:
+- `ila_trigger.sv`
+- `ila_capture_fsm.sv`
+- `ila_bram.sv`
+- `ila_bscane2_top.sv`
 - `<top_module>.sv`
 - `ila_generated.xdc`
 - `create_project.tcl`
 - `build_bitstream.tcl`
 - `README.md`
 
-All generated helper files must refer to repository RTL using relative paths only.
-Absolute local machine paths are forbidden.
+The generated package must be self-contained and must not depend on absolute local machine paths.
 
 ## Wrapper RTL contract
 
@@ -86,7 +89,7 @@ The generator must reject:
 
 `create_project.tcl` must:
 - create a project for the requested device part
-- add the shared core RTL from `hdl/ila/rtl`
+- add the bundled core RTL from the generated output directory
 - add the generated wrapper from the output directory
 - add the generated XDC
 - set the generated wrapper as top module

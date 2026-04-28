@@ -112,7 +112,7 @@ public:
     // -----------------------------------------------------------------------
 
     // Sample all observable pins via JTAG SAMPLE instruction.
-    // Returns {"device_index": N, "pins": {"PIN_NAME": "high"|"low"|"unknown"}}
+    // Returns {"device_index": N, "pins": {...}, "raw_bsr": [byte0, ...]}
     nlohmann::json sampleBsr(int device_index, int timeout_ms = 3000);
 
     // Execute a script on the daemon.  Returns {"ok": bool, "output": "..."}.

@@ -41,6 +41,7 @@ struct IlaGeneratedFiles {
     std::filesystem::path output_dir;
     std::string wrapper_file_name;
     std::string wrapper_sv;
+    std::vector<std::string> bundled_rtl_file_names;
     std::string create_project_tcl;
     std::string build_bitstream_tcl;
     std::string xdc;

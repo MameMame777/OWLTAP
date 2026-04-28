@@ -20,8 +20,12 @@ enum class DisplayFormat {
 /// Panel that shows selected signals' values in various numeric formats.
 class HexPanel {
 public:
+    struct DrawActions {
+        bool single_requested = false;
+    };
+
     /// Draw the hex display panel (call each frame).
-    static void draw();
+    static DrawActions draw(bool can_capture);
 
     /// Update displayed values from a scan result.
     static void updateValues(const jtag::ScanResult& result,

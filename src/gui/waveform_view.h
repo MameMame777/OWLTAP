@@ -19,7 +19,6 @@ public:
     /// Returns which panel actions were requested.
     struct DrawActions {
         bool run_requested = false;
-        bool single_requested = false;
         bool stop_requested = false;
         bool clear_requested = false;
         bool fit_requested = false;

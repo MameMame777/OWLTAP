@@ -100,7 +100,7 @@ flowchart TB
 
 ## バウンダリスキャン波形キャプチャ
 
-BSDL を読み込み、信号パネルでピンを選択するだけで波形キャプチャが始まります。
+BSDL を読み込み、信号パネルでピンを選択。RUNボタンをクリックすることで波形キャプチャを行えます。
 
 <p align="center">
   <img src="docs/JTAGwave.png" alt="波形キャプチャ" width="800"/><br/>

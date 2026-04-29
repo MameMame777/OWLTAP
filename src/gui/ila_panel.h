@@ -14,6 +14,7 @@
 #include "src/ila/bscane_ila_tap_backend.h"
 #include "src/ila/ila_driver.h"
 #include "src/ila/ila_tap_backend.h"
+#include "src/protocol/protocol.h"
 
 namespace jtag {
 class JtagChain;
@@ -131,9 +132,10 @@ private:
     void doRead();
     void pollCaps();    ///< Re-probe ILA caps via daemon RPC (daemon mode only)
     void pollStatus();
-    void drawWaveform();      // multi-lane ImPlot chart
-    void drawSignalEditor();   // collapsible lane-definition table
-    void resetSignalDefs();    // populate default from IlaCaps.data_w
+    void drawWaveform();        // multi-lane ImPlot chart
+    void drawSignalEditor();     // collapsible lane-definition table
+    void resetSignalDefs();      // populate default from IlaCaps.data_w
+    void drawProtocolDecode();   // collapsible protocol-decoder section
 
     /// Compute hardware trigger registers from per-lane settings.
     /// Produces Group A (mask/value/rise/fall) and Group B (mask2/val2).
@@ -177,6 +179,7 @@ private:
 
     // Waveform plot data (x = time in ns; y not needed for bus display)
     std::vector<double>    wave_x_;
+    bool                   fit_wave_ = false;  // request X-axis fit-to-all on next frame
 
     // Signal lane definitions (auto-populated from probe(); user-editable)
     std::vector<IlaSignalDef>  signals_;
@@ -188,6 +191,30 @@ private:
 
     SampleCallback sample_cb_;
     bool           visible_ = true;
+
+    // Protocol decode UI state
+    double proto_ns_per_sample_ = 8.0;  ///< User-configurable ns per ILA sample
+    int    proto_selected_       = 0;   ///< 0=UART, 1=SPI, 2=I2C
+    std::vector<jtag::protocol::DecodedFrame> proto_frames_;
+    // UART
+    int  proto_uart_rx_idx_     = 0;
+    int  proto_uart_baud_       = 9600;
+    int  proto_uart_data_bits_  = 8;
+    int  proto_uart_stop_bits_  = 1;
+    bool proto_uart_parity_en_  = false;
+    bool proto_uart_parity_odd_ = false;
+    // SPI
+    int  proto_spi_clk_idx_   = 0;
+    int  proto_spi_mosi_idx_  = 0;
+    int  proto_spi_miso_idx_  = 0;
+    int  proto_spi_cs_idx_    = 0;
+    bool proto_spi_cpol_      = false;
+    bool proto_spi_cpha_      = false;
+    bool proto_spi_lsb_first_ = false;
+    int  proto_spi_bpw_       = 8;
+    // I2C
+    int proto_i2c_scl_idx_ = 0;
+    int proto_i2c_sda_idx_ = 0;
 };
 
 } // namespace jtag::gui

@@ -26,6 +26,12 @@ public:
     virtual bool shiftDr(int dr_bits, const uint8_t* tdi,
                           std::vector<uint8_t>& tdo) = 0;
 
+    /// Perform @p count DR scans of @p dr_bits bits, all with the same @p tdi,
+    /// returning flattened TDO: count × ceil(dr_bits/8) bytes in order.
+    /// Default: calls shiftDr in a loop.  Backends can override for bulk perf.
+    virtual bool shiftDrBatch(int count, int dr_bits, const uint8_t* tdi,
+                               std::vector<uint8_t>& flat_tdo);
+
     virtual const std::string& lastError() const = 0;
 };
 

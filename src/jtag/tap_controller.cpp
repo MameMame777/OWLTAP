@@ -294,4 +294,98 @@ bool TapController::doShift(const uint8_t* tdi_data,
     return true;
 }
 
+bool TapController::shiftDRRepeat(int count, int dr_bits, const uint8_t* tdi,
+                                   std::vector<uint8_t>& flat_tdo) {
+    if (count <= 0 || dr_bits <= 0) { flat_tdo.clear(); return true; }
+
+    // Precompute TMS paths (always from RUN_TEST_IDLE)
+    uint8_t tms_to_shift;
+    int     len_to_shift = computeTmsPath(TapState::RUN_TEST_IDLE,
+                                          TapState::SHIFT_DR, tms_to_shift);
+    uint8_t tms_to_idle;
+    int     len_to_idle  = computeTmsPath(TapState::EXIT1_DR,
+                                          TapState::RUN_TEST_IDLE, tms_to_idle);
+
+    const int bulk_bits       = dr_bits - 1;
+    const int bulk_bytes      = bulk_bits / 8;
+    const int bulk_remaining  = bulk_bits % 8;
+    const int last_bit_byte   = (dr_bits - 1) / 8;
+    const int last_bit_pos    = (dr_bits - 1) % 8;
+    const bool last_tdi       = tdi ? ((tdi[last_bit_byte] >> last_bit_pos) & 1) : false;
+    const int bytes_per       = (dr_bits + 7) / 8;
+    // Bytes of TDO returned per scan (bulk_bytes + partial_byte + last_bit_byte)
+    const int tdo_raw_per     = bulk_bytes + (bulk_remaining ? 1 : 0) + 1;
+
+    flat_tdo.assign(static_cast<size_t>(count) * bytes_per, 0u);
+
+    // Chunk size: keep TDO data comfortably inside D2XX USB driver buffer (64KB).
+    // 512 scans × tdo_raw_per(≤6) ≈ 3 KB — well within the 4 KB FTDI RX FIFO.
+    constexpr int kChunk = 512;
+
+    uint8_t* out_ptr = flat_tdo.data();
+    for (int done = 0; done < count; done += kChunk) {
+        const int n = std::min(kChunk, count - done);
+
+        MpsseCommandBuffer cmd;
+        for (int i = 0; i < n; ++i) {
+            // RUN_TEST_IDLE → SHIFT_DR
+            cmd.clockTms(tms_to_shift, len_to_shift, false, false);
+            // Bulk bytes
+            if (bulk_bytes > 0)      cmd.shiftInOut(tdi, bulk_bytes * 8);
+            // Remaining bits (bit mode)
+            if (bulk_remaining > 0) {
+                uint8_t partial = tdi ? tdi[bulk_bytes] : 0u;
+                cmd.shiftInOut(&partial, bulk_remaining);
+            }
+            // Last bit via TMS with TDO readback → exits to EXIT1_DR
+            cmd.clockTms(0x01u, 1, last_tdi, /*read_tdo=*/true);
+            // EXIT1_DR → RUN_TEST_IDLE
+            cmd.clockTms(tms_to_idle, len_to_idle, false, false);
+        }
+        cmd.sendImmediate();
+
+        std::vector<uint8_t> raw;
+        if (!device_.transfer(cmd, raw)) {
+            last_error_ = device_.lastError();
+            return false;
+        }
+
+        // Unpack TDO: same layout as doShift(), per scan:
+        //   bulk_bytes bytes | (bulk_remaining?1:0) bytes | 1 byte (TMS last bit)
+        size_t raw_idx = 0;
+        for (int i = 0; i < n; ++i) {
+            // bulk bytes
+            if (bulk_bytes > 0) {
+                if (raw_idx + bulk_bytes > raw.size()) {
+                    last_error_ = "shiftDRRepeat: TDO underrun (bulk)"; return false;
+                }
+                std::memcpy(out_ptr, raw.data() + raw_idx, bulk_bytes);
+                raw_idx += bulk_bytes;
+            }
+            // partial bits (right-justified in returned byte)
+            if (bulk_remaining > 0) {
+                if (raw_idx >= raw.size()) {
+                    last_error_ = "shiftDRRepeat: TDO underrun (partial)"; return false;
+                }
+                uint8_t partial = raw[raw_idx++];
+                partial >>= (8 - bulk_remaining);
+                for (int b = 0; b < bulk_remaining; ++b)
+                    if ((partial >> b) & 1u)
+                        out_ptr[bulk_bytes] |= static_cast<uint8_t>(1u << b);
+            }
+            // last bit (TDO in bit 7 of TMS-read response byte)
+            if (raw_idx >= raw.size()) {
+                last_error_ = "shiftDRRepeat: TDO underrun (last)"; return false;
+            }
+            if ((raw[raw_idx++] >> 7) & 1u)
+                out_ptr[last_bit_byte] |= static_cast<uint8_t>(1u << last_bit_pos);
+
+            out_ptr += bytes_per;
+        }
+    }
+
+    state_ = TapState::RUN_TEST_IDLE;
+    return true;
+}
+
 } // namespace jtag

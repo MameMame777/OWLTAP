@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "src/ila/ila_tap_backend.h"
 
+#include <cstring>
+
 #include "src/jtag/jtag_chain.h"
 #include "src/jtag/tap_controller.h"
 
@@ -57,6 +59,19 @@ bool ChainIlaTapBackend::shiftDr(int dr_bits, const uint8_t* tdi,
         if ((full_tdo[s / 8] >> (s % 8)) & 1u) {
             tdo[b / 8] |= static_cast<uint8_t>(1u << (b % 8));
         }
+    }
+    return true;
+}
+
+// Default shiftDrBatch: loop over shiftDr.  Backends may override for batching.
+bool IlaTapBackend::shiftDrBatch(int count, int dr_bits, const uint8_t* tdi,
+                                  std::vector<uint8_t>& flat_tdo) {
+    const int bytes_per = (dr_bits + 7) / 8;
+    flat_tdo.assign(static_cast<size_t>(count) * bytes_per, 0u);
+    for (int i = 0; i < count; ++i) {
+        std::vector<uint8_t> tdo_i;
+        if (!shiftDr(dr_bits, tdi, tdo_i)) return false;
+        std::memcpy(flat_tdo.data() + i * bytes_per, tdo_i.data(), bytes_per);
     }
     return true;
 }

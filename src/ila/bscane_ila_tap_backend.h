@@ -53,6 +53,10 @@ public:
     bool selectIr(uint32_t opcode) override;
     bool shiftDr(int dr_bits, const uint8_t* tdi,
                   std::vector<uint8_t>& tdo) override;
+    /// Bulk override: performs a prime scan then N real scans via
+    /// TapController::shiftDRRepeat — one USB round-trip per 512-scan chunk.
+    bool shiftDrBatch(int count, int dr_bits, const uint8_t* tdi,
+                       std::vector<uint8_t>& flat_tdo) override;
     const std::string& lastError() const override { return last_error_; }
 
     /// Xilinx 7-series / Zynq PL TAP USER instruction opcodes (IR = 6 bits).

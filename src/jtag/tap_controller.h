@@ -91,6 +91,20 @@ public:
     /// @return true on success
     bool readDR(std::vector<uint8_t>& tdo_data, int dr_bits);
 
+    /// Perform @p count identical DR scans of @p dr_bits bits (same TDI each
+    /// scan), batched into a single MPSSE USB transfer per chunk. Significantly
+    /// faster than calling shiftDR in a loop because USB round-trips are reduced
+    /// from O(count) to O(count/kChunk).
+    ///
+    /// @param count     Number of scans to perform
+    /// @param dr_bits   Bits per scan
+    /// @param tdi       TDI data, ceil(dr_bits/8) bytes, same for every scan.
+    ///                  May be nullptr (shifts zeros).
+    /// @param flat_tdo  Output: count × ceil(dr_bits/8) bytes, TDO in order.
+    /// @return true on success; TAP is left in RUN-TEST-IDLE.
+    bool shiftDRRepeat(int count, int dr_bits, const uint8_t* tdi,
+                       std::vector<uint8_t>& flat_tdo);
+
     /// Get last error message
     const std::string& lastError() const { return last_error_; }
 

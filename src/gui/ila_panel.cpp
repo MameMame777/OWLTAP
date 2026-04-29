@@ -3,11 +3,16 @@
 
 #include <imgui.h>
 #include <implot.h>
+#include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 
 #include "gui_daemon_client.h"
 #include "src/jtag/jtag_chain.h"
+#include "src/protocol/i2c_decoder.h"
+#include "src/protocol/spi_decoder.h"
+#include "src/protocol/uart_decoder.h"
 
 namespace jtag::gui {
 
@@ -55,6 +60,43 @@ static void formatSampleValue(char* buf, size_t sz,
             break;
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ILA -> SampleFrame adapter
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Convert raw ILA uint32 samples to SampleFrame vector for protocol decoders.
+/// Only 1-bit signals from `defs` are placed into pin_states; bus lanes are
+/// skipped because the protocol decoders work on single-bit lines.
+static std::vector<jtag::SampleFrame> ilaToSampleFrames(
+    const std::vector<uint32_t>&    raw,
+    const std::vector<IlaSignalDef>& defs,
+    double                           ns_per_sample)
+{
+    std::vector<jtag::SampleFrame> out;
+    out.reserve(raw.size());
+    const jtag::SampleFrame* t0 = nullptr;  // set on first frame
+    for (size_t i = 0; i < raw.size(); i++) {
+        jtag::SampleFrame f{};
+        // Synthesise a timestamp from sample index and configured period.
+        const auto ns = std::chrono::nanoseconds(
+            static_cast<long long>(i * ns_per_sample));
+        f.timestamp = std::chrono::steady_clock::time_point{} +
+                      std::chrono::duration_cast<
+                          std::chrono::steady_clock::duration>(ns);
+        for (const auto& sig : defs) {
+            if (sig.width() != 1) continue;  // skip bus lanes
+            const jtag::PinState ps = (sig.extract(raw[i]) != 0u)
+                ? jtag::PinState::HIGH
+                : jtag::PinState::LOW;
+            f.data.pin_states[sig.name] = ps;
+        }
+        out.push_back(std::move(f));
+        if (i == 0) t0 = &out.back();
+    }
+    (void)t0;
+    return out;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -405,6 +447,9 @@ void IlaPanel::doArm() {
         return;
     }
     trigger_dirty_ = false;
+    // Always reset first: FSM in ST_FULL transitions FULL→IDLE on ARM,
+    // not IDLE→ARMED. resetCapture() guarantees FSM is in ST_IDLE before arm().
+    (void)driver_->resetCapture();
     if (!driver_->arm()) {
         last_error_ = driver_->lastError();
         return;
@@ -691,6 +736,10 @@ void IlaPanel::draw() {
     if (hw_ok)
         drawSignalEditor();
 
+    // ── Protocol decode ──────────────────────────────────────────────
+    if (has_samples_)
+        drawProtocolDecode();
+
     // ── Error display ────────────────────────────────────────────────
     if (!last_error_.empty()) {
         ImGui::Separator();
@@ -868,6 +917,191 @@ void IlaPanel::drawSignalEditor() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// drawProtocolDecode  -- collapsible protocol analyzer section
+// ─────────────────────────────────────────────────────────────────────────────
+
+void IlaPanel::drawProtocolDecode() {
+    if (!has_samples_ || samples_.empty()) return;
+    if (!ImGui::CollapsingHeader("Protocol Decode")) return;
+
+    // Collect 1-bit signal names for pin selection combos.
+    std::vector<const char*> bit_names;
+    for (const auto& sig : signals_)
+        if (sig.width() == 1) bit_names.push_back(sig.name);
+
+    if (bit_names.empty()) {
+        ImGui::TextDisabled("No 1-bit signals defined. Add single-bit lanes in Signal Definitions.");
+        return;
+    }
+
+    const int n_bits = static_cast<int>(bit_names.size());
+
+    // Clamp stored indices to valid range when signal list changes.
+    auto clamp_idx = [&](int& idx) { if (idx >= n_bits) idx = 0; };
+    clamp_idx(proto_uart_rx_idx_);
+    clamp_idx(proto_spi_clk_idx_);
+    clamp_idx(proto_spi_mosi_idx_);
+    clamp_idx(proto_spi_miso_idx_);
+    clamp_idx(proto_spi_cs_idx_);
+    clamp_idx(proto_i2c_scl_idx_);
+    clamp_idx(proto_i2c_sda_idx_);
+
+    // ns/sample setting
+    ImGui::SetNextItemWidth(120);
+    ImGui::InputDouble("ns / sample", &proto_ns_per_sample_, 0.0, 0.0, "%.2f");
+    if (proto_ns_per_sample_ <= 0.0) proto_ns_per_sample_ = 1.0;
+
+    ImGui::SameLine(0, 16);
+
+    // Protocol selector
+    static const char* kProtoNames[] = {"UART", "SPI", "I2C"};
+    ImGui::SetNextItemWidth(80);
+    ImGui::Combo("Protocol##proto_sel", &proto_selected_, kProtoNames, 3);
+
+    ImGui::Spacing();
+
+    if (proto_selected_ == 0) {
+        // ── UART ──────────────────────────────────────────────────────
+        ImGui::SetNextItemWidth(160);
+        ImGui::Combo("RX pin##urx", &proto_uart_rx_idx_, bit_names.data(), n_bits);
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(100);
+        static const char* kBauds[] = {"1200","2400","4800","9600","19200","38400","57600","115200","230400","460800","921600","1000000"};
+        static const int   kBaudVals[] = {1200,2400,4800,9600,19200,38400,57600,115200,230400,460800,921600,1000000};
+        // Find closest index
+        int baud_idx = 3;
+        for (int i = 0; i < 12; ++i)
+            if (kBaudVals[i] == proto_uart_baud_) { baud_idx = i; break; }
+        if (ImGui::Combo("Baud##ubaud", &baud_idx, kBauds, 12))
+            proto_uart_baud_ = kBaudVals[baud_idx];
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(60);
+        ImGui::SliderInt("Bits##udbits", &proto_uart_data_bits_, 5, 8);
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(50);
+        ImGui::SliderInt("Stop##ustop", &proto_uart_stop_bits_, 1, 2);
+
+        ImGui::SameLine();
+        ImGui::Checkbox("Parity##upar", &proto_uart_parity_en_);
+        if (proto_uart_parity_en_) {
+            ImGui::SameLine();
+            ImGui::Checkbox("Odd##uodd", &proto_uart_parity_odd_);
+        }
+
+    } else if (proto_selected_ == 1) {
+        // ── SPI ───────────────────────────────────────────────────────
+        ImGui::SetNextItemWidth(160); ImGui::Combo("CLK##sclk",  &proto_spi_clk_idx_,  bit_names.data(), n_bits);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(160); ImGui::Combo("MOSI##smosi",&proto_spi_mosi_idx_, bit_names.data(), n_bits);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(160); ImGui::Combo("MISO##smiso",&proto_spi_miso_idx_, bit_names.data(), n_bits);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(160); ImGui::Combo("CS##scs",    &proto_spi_cs_idx_,   bit_names.data(), n_bits);
+
+        ImGui::Checkbox("CPOL##scpol", &proto_spi_cpol_);
+        ImGui::SameLine();
+        ImGui::Checkbox("CPHA##scpha", &proto_spi_cpha_);
+        ImGui::SameLine();
+        ImGui::Checkbox("LSB first##slsb", &proto_spi_lsb_first_);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(70);
+        ImGui::SliderInt("Bits/word##sbpw", &proto_spi_bpw_, 1, 64);
+
+    } else {
+        // ── I2C ───────────────────────────────────────────────────────
+        ImGui::SetNextItemWidth(160); ImGui::Combo("SCL##iscl", &proto_i2c_scl_idx_, bit_names.data(), n_bits);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(160); ImGui::Combo("SDA##isda", &proto_i2c_sda_idx_, bit_names.data(), n_bits);
+    }
+
+    ImGui::Spacing();
+    if (ImGui::Button("Decode", ImVec2(90, 0))) {
+        // Build synthetic SampleFrame vector from ILA raw samples.
+        auto frames = ilaToSampleFrames(samples_, signals_, proto_ns_per_sample_);
+
+        proto_frames_.clear();
+        if (proto_selected_ == 0) {
+            jtag::protocol::UartConfig cfg;
+            cfg.rx_pin      = bit_names[proto_uart_rx_idx_];
+            cfg.baud_rate   = static_cast<uint32_t>(proto_uart_baud_);
+            cfg.data_bits   = proto_uart_data_bits_;
+            cfg.stop_bits   = proto_uart_stop_bits_;
+            cfg.parity_enable = proto_uart_parity_en_;
+            cfg.parity_odd  = proto_uart_parity_odd_;
+            proto_frames_ = jtag::protocol::decodeUart(frames, cfg);
+        } else if (proto_selected_ == 1) {
+            jtag::protocol::SpiConfig cfg;
+            cfg.clk_pin      = bit_names[proto_spi_clk_idx_];
+            cfg.mosi_pin     = bit_names[proto_spi_mosi_idx_];
+            cfg.miso_pin     = bit_names[proto_spi_miso_idx_];
+            cfg.cs_pin       = bit_names[proto_spi_cs_idx_];
+            cfg.cpol         = proto_spi_cpol_;
+            cfg.cpha         = proto_spi_cpha_;
+            cfg.lsb_first    = proto_spi_lsb_first_;
+            cfg.bits_per_word = proto_spi_bpw_;
+            proto_frames_ = jtag::protocol::decodeSpi(frames, cfg);
+        } else {
+            jtag::protocol::I2cConfig cfg;
+            cfg.scl_pin = bit_names[proto_i2c_scl_idx_];
+            cfg.sda_pin = bit_names[proto_i2c_sda_idx_];
+            proto_frames_ = jtag::protocol::decodeI2c(frames, cfg);
+        }
+    }
+
+    // Results table
+    if (proto_frames_.empty()) {
+        if (ImGui::IsItemDeactivatedAfterEdit() || true)
+            ImGui::TextDisabled("(no frames decoded)");
+        return;
+    }
+
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
+                       "%zu frame(s)", proto_frames_.size());
+
+    constexpr ImGuiTableFlags kTbl =
+        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit;
+    const float tbl_h = std::min(
+        static_cast<float>(proto_frames_.size()) * ImGui::GetTextLineHeightWithSpacing() + 30.0f,
+        200.0f);
+
+    if (!ImGui::BeginTable("##proto_results", 5, kTbl, ImVec2(-1, tbl_h)))
+        return;
+
+    ImGui::TableSetupColumn("Start (ns)", ImGuiTableColumnFlags_WidthFixed,  90.0f);
+    ImGui::TableSetupColumn("End (ns)",   ImGuiTableColumnFlags_WidthFixed,  90.0f);
+    ImGui::TableSetupColumn("Label",      ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Data",       ImGuiTableColumnFlags_WidthFixed, 100.0f);
+    ImGui::TableSetupColumn("Err",        ImGuiTableColumnFlags_WidthFixed,  30.0f);
+    ImGui::TableHeadersRow();
+
+    const double us_to_ns = 1000.0;
+    for (const auto& f : proto_frames_) {
+        ImGui::TableNextRow();
+        if (f.error_flag)
+            ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+                                   IM_COL32(100, 30, 30, 120));
+        ImGui::TableSetColumnIndex(0);
+        ImGui::Text("%.1f", f.start_us * us_to_ns);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::Text("%.1f", f.end_us * us_to_ns);
+        ImGui::TableSetColumnIndex(2);
+        ImGui::TextUnformatted(f.label.c_str());
+        ImGui::TableSetColumnIndex(3);
+        ImGui::TextUnformatted(f.data.c_str());
+        ImGui::TableSetColumnIndex(4);
+        if (f.error_flag)
+            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "!");
+    }
+
+    ImGui::EndTable();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // drawWaveform  -- embedded ImPlot chart
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -877,6 +1111,8 @@ void IlaPanel::drawWaveform() {
 
     ImGui::Separator();
     ImGui::Text("Waveform  (8 ns/sample @ 125 MHz)");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Fit")) fit_wave_ = true;
 
     const int n_lanes = static_cast<int>(signals_.size());
     if (n_lanes == 0) {
@@ -884,12 +1120,18 @@ void IlaPanel::drawWaveform() {
         return;
     }
 
-    // Y-axis tick positions and labels (lane 0 = topmost = highest Y value)
-    std::vector<double>      tick_y(n_lanes);
-    std::vector<const char*> tick_names(n_lanes);
+    // Y-axis tick positions and labels (lane 0 = topmost = highest Y value).
+    // When protocol frames exist, a "Protocol" row is appended below lane 0.
+    const bool has_proto = !proto_frames_.empty();
+    std::vector<double>      tick_y(n_lanes + (has_proto ? 1 : 0));
+    std::vector<const char*> tick_names(n_lanes + (has_proto ? 1 : 0));
     for (int i = 0; i < n_lanes; i++) {
         tick_y[i]     = static_cast<double>(n_lanes - i) - 0.5;
         tick_names[i] = signals_[i].name;
+    }
+    if (has_proto) {
+        tick_y[n_lanes]     = -0.5;
+        tick_names[n_lanes] = "Protocol";
     }
 
     // Lane color palette (6-color cyclic)
@@ -910,7 +1152,8 @@ void IlaPanel::drawWaveform() {
     // Scale plot height to number of lanes (≥80 px floor)
     const float lane_px  = 28.0f;
     const float avail_h  = ImGui::GetContentRegionAvail().y - 8.0f;
-    const float target_h = lane_px * static_cast<float>(n_lanes) + 20.0f;
+    const float effective_lanes = static_cast<float>(n_lanes) + (has_proto ? 1.0f : 0.0f);
+    const float target_h = lane_px * effective_lanes + 20.0f;
     const float plot_h   = std::max({avail_h, target_h, 80.0f});
 
     if (!ImPlot::BeginPlot("##ila_wave", ImVec2(-1.0f, plot_h),
@@ -920,10 +1163,17 @@ void IlaPanel::drawWaveform() {
     ImPlot::SetupAxes("Time (ns)", nullptr,
                       ImPlotAxisFlags_None,
                       ImPlotAxisFlags_NoGridLines | ImPlotAxisFlags_NoTickMarks);
-    ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, static_cast<double>(n_lanes),
+    if (fit_wave_) {
+        const double t_end = wave_x_.back() + sample_period;
+        ImPlot::SetupAxisLimits(ImAxis_X1, wave_x_.front(), t_end, ImPlotCond_Always);
+        fit_wave_ = false;
+    }
+    ImPlot::SetupAxisLimits(ImAxis_Y1, has_proto ? -1.0 : 0.0,
+                            static_cast<double>(n_lanes),
                             ImPlotCond_Always);
     ImPlot::SetupAxisTicks(ImAxis_Y1,
-                           tick_y.data(), n_lanes, tick_names.data());
+                           tick_y.data(), static_cast<int>(tick_y.size()),
+                           tick_names.data());
 
     ImDrawList* dl = ImPlot::GetPlotDrawList();
     ImPlot::PushPlotClipRect();
@@ -988,11 +1238,43 @@ void IlaPanel::drawWaveform() {
         }
     }
 
+    // Protocol annotation blocks (drawn in the "Protocol" row at y = [-0.9, -0.1])
+    if (has_proto) {
+        const double py_hi = -0.1;
+        const double py_lo = -0.9;
+        const ImU32 kProtoFill  = IM_COL32( 80,160,255, 90);
+        const ImU32 kProtoLine  = IM_COL32( 80,160,255,220);
+        const ImU32 kErrFill    = IM_COL32(255, 80, 80, 90);
+        const ImU32 kErrLine    = IM_COL32(255, 80, 80,220);
+        // proto timestamps are in microseconds; wave_x_ is in nanoseconds
+        const double us_to_ns = 1000.0;
+        for (const auto& pf : proto_frames_) {
+            const double t0 = pf.start_us * us_to_ns;
+            const double t1 = pf.end_us   * us_to_ns;
+            if (t1 <= t0) continue;
+            const ImVec2 p0 = ImPlot::PlotToPixels(t0, py_hi);
+            const ImVec2 p1 = ImPlot::PlotToPixels(t1, py_lo);
+            dl->AddRectFilled(p0, p1, pf.error_flag ? kErrFill : kProtoFill);
+            dl->AddRect      (p0, p1, pf.error_flag ? kErrLine : kProtoLine,
+                              0.0f, 0, 1.5f);
+            const float bw = p1.x - p0.x;
+            const float tw = ImGui::CalcTextSize(pf.label.c_str()).x;
+            if (bw > tw + 6.0f) {
+                dl->AddText(
+                    ImVec2((p0.x + p1.x) * 0.5f - tw * 0.5f,
+                           (p0.y + p1.y) * 0.5f
+                           - ImGui::GetTextLineHeight() * 0.5f),
+                    col_text, pf.label.c_str());
+            }
+        }
+    }
+
     // Trigger cursor
     if (pre_samples_ > 0 && pre_samples_ < n) {
         const double tx = wave_x_[pre_samples_];
+        const double y_bot = has_proto ? -1.0 : 0.0;
         dl->AddLine(ImPlot::PlotToPixels(tx, static_cast<double>(n_lanes)),
-                    ImPlot::PlotToPixels(tx, 0.0),
+                    ImPlot::PlotToPixels(tx, y_bot),
                     IM_COL32(255, 80, 80, 220), 1.5f);
     }
 

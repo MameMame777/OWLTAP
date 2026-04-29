@@ -111,4 +111,69 @@ bool BscaneIlaTapBackend::shiftDr(int dr_bits, const uint8_t* tdi,
     return true;
 }
 
+bool BscaneIlaTapBackend::shiftDrBatch(int count, int dr_bits, const uint8_t* tdi,
+                                        std::vector<uint8_t>& flat_tdo) {
+    if (count <= 0) { flat_tdo.clear(); return true; }
+
+    const auto& devs = chain_.devices();
+    const int n = static_cast<int>(devs.size());
+    const int total_dr = kFrameBits + (n - 1);  // e.g. 38 for 2-device chain
+
+    // Build the full-chain TDI frame (same for every scan):
+    //   bits[4:0]          = pending_ir_ (BSCANE2 sub-opcode)
+    //   bits[36:5]         = tdi data field (≤32 bits)
+    //   bits[total_dr-1:37]= 0 (BYPASS for other chain devices below pl_tap)
+    const int data_bits = std::min(dr_bits, 32);
+    int skip = 0;
+    for (int i = 0; i < pl_tap_index_; ++i) skip += 1;
+
+    std::vector<uint8_t> full_tdi((total_dr + 7) / 8, 0x00u);
+    // opcode in frame bits [4:0] (pl_tap starts at bit `skip`)
+    for (int b = 0; b < 5; ++b) {
+        if ((pending_ir_ >> b) & 1u) {
+            const int p = skip + b;
+            full_tdi[p / 8] |= static_cast<uint8_t>(1u << (p % 8));
+        }
+    }
+    // data payload in frame bits [36:5]
+    for (int b = 0; b < data_bits; ++b) {
+        if ((tdi[b / 8] >> (b % 8)) & 1u) {
+            const int p = skip + 5 + b;
+            full_tdi[p / 8] |= static_cast<uint8_t>(1u << (p % 8));
+        }
+    }
+
+    // Prime scan if the hardware's stored_ir doesn't match pending_ir_.
+    if (stored_ir_in_hw_ != pending_ir_) {
+        static const uint8_t zeros[4] = {};
+        std::vector<uint8_t> dummy;
+        if (!doRawFrameShift(zeros, dummy)) return false;
+        stored_ir_in_hw_ = pending_ir_;
+    }
+
+    // Batch: count real scans via TapController::shiftDRRepeat
+    std::vector<uint8_t> raw_flat;
+    if (!chain_.tap().shiftDRRepeat(count, total_dr, full_tdi.data(), raw_flat)) {
+        last_error_ = chain_.tap().lastError();
+        return false;
+    }
+    stored_ir_in_hw_ = pending_ir_;
+
+    // Extract data field [36:5] from each scan's TDO into flat_tdo
+    const int data_start = skip + 5;
+    const int out_bytes  = (dr_bits + 7) / 8;
+    const int raw_bytes  = (total_dr + 7) / 8;
+    flat_tdo.assign(static_cast<size_t>(count) * out_bytes, 0u);
+    for (int i = 0; i < count; ++i) {
+        const uint8_t* raw = raw_flat.data() + i * raw_bytes;
+        uint8_t*       out = flat_tdo.data() + i * out_bytes;
+        for (int b = 0; b < data_bits; ++b) {
+            const int s = data_start + b;
+            if ((raw[s / 8] >> (s % 8)) & 1u)
+                out[b / 8] |= static_cast<uint8_t>(1u << (b % 8));
+        }
+    }
+    return true;
+}
+
 } // namespace jtag::ila

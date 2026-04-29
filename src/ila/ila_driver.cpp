@@ -122,7 +122,7 @@ bool IlaDriver::configureTrigger(uint32_t mask, uint32_t value,
                                    uint32_t rise_mask, uint32_t fall_mask,
                                    uint32_t mask2, uint32_t val2, bool or_mode,
                                    uint16_t pre_samples) {
-    if (pre_samples >= static_cast<uint16_t>(depth())) {
+    if (static_cast<uint32_t>(pre_samples) >= depth()) {
         last_error_ = "pre_samples must be < DEPTH";
         return false;
     }
@@ -222,12 +222,22 @@ bool IlaDriver::readSamples(std::vector<uint32_t>& out) {
 
 bool IlaDriver::readSamples(std::vector<uint32_t>& out, uint32_t count) {
     if (!backend_.selectIr(kIrReadData)) { last_error_ = backend_.lastError(); return false; }
+    // Use batch path: eliminates per-sample USB round-trips.
+    // BscaneIlaTapBackend overrides shiftDrBatch to use TapController::shiftDRRepeat,
+    // sending all scans in chunks of 512 per USB transfer (~3ms/chunk vs ~1ms/sample).
+    static const uint8_t zeros[4] = {};
+    std::vector<uint8_t> flat_tdo;
+    if (!backend_.shiftDrBatch(static_cast<int>(count), dataWidth(), zeros, flat_tdo)) {
+        last_error_ = backend_.lastError();
+        return false;
+    }
+    const int bytes_per = (dataWidth() + 7) / 8;
     out.clear();
     out.reserve(count);
-    for (uint32_t i = 0; i < count; i++) {
-        uint32_t sample;
-        if (!shiftDrInt(dataWidth(), 0, sample)) return false;
-        out.push_back(sample);
+    for (uint32_t i = 0; i < count; ++i) {
+        std::vector<uint8_t> slice(flat_tdo.begin() + i * bytes_per,
+                                    flat_tdo.begin() + i * bytes_per + bytes_per);
+        out.push_back(unpackBits(slice, dataWidth()));
     }
     return true;
 }

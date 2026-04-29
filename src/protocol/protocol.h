@@ -32,11 +32,13 @@ inline bool samplePinValue(const jtag::SampleFrame& frame,
 }
 
 /// Convert a sample timestamp to microseconds from t0.
+/// Uses nanosecond resolution to avoid truncation at sub-microsecond sample rates
+/// (e.g. 8 ns/sample ILA captures at 125 MHz).
 inline double sampleTimeUs(const jtag::SampleFrame& frame,
                             const jtag::SampleFrame& t0_frame) {
     return static_cast<double>(
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            frame.timestamp - t0_frame.timestamp).count());
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            frame.timestamp - t0_frame.timestamp).count()) / 1000.0;
 }
 
 }  // namespace jtag::protocol

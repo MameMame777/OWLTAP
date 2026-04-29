@@ -45,6 +45,7 @@ std::vector<DecodedFrame> decodeUart(const std::vector<jtag::SampleFrame>& sampl
         // Decode data bits
         uint32_t data_val = 0;
         bool frame_error = false;
+        bool truncated    = false;  // true = ran out of samples (incomplete frame)
 
         for (int bit = 0; bit < cfg.data_bits; bit++) {
             // Sample middle of data bit
@@ -53,7 +54,7 @@ std::vector<DecodedFrame> decodeUart(const std::vector<jtag::SampleFrame>& sampl
                    sampleTimeUs(samples[i + 1], t0) <= bit_center_us) {
                 i++;
             }
-            if (i >= n) { frame_error = true; break; }
+            if (i >= n) { truncated = true; frame_error = true; break; }
             if (samplePinValue(samples[i], cfg.rx_pin)) {
                 data_val |= (1u << bit);  // LSB first
             }
@@ -83,12 +84,27 @@ std::vector<DecodedFrame> decodeUart(const std::vector<jtag::SampleFrame>& sampl
                sampleTimeUs(samples[i + 1], t0) <= stop_center_us) {
             i++;
         }
-        bool stop_ok = (i >= n) || samplePinValue(samples[i], cfg.rx_pin);
-        if (!stop_ok) frame_error = true;
+        if (i >= n) {
+            truncated = true;
+        } else if (sampleTimeUs(samples[i], t0) < stop_center_us - bit_us * 0.5) {
+            // The last available sample is too far before the stop bit centre --
+            // the frame extends beyond the capture buffer.
+            truncated = true;
+        } else if (!samplePinValue(samples[i], cfg.rx_pin)) {
+            frame_error = true;  // stop bit is LOW -> framing error
+        }
 
         // Record frame end time (after stop bit)
         double end_time_us = start_time_us +
                              bit_us * (1.0 + total_data_parity_bits + cfg.stop_bits);
+
+        // Discard frames that were cut off at the end of the sample buffer.
+        // These are not real framing errors; there simply are not enough samples
+        // to complete the frame.  A proper framing error (stop bit LOW) is kept.
+        if (truncated) {
+            i++;
+            continue;
+        }
 
         // Emit DecodedFrame
         DecodedFrame f;

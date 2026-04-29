@@ -363,6 +363,7 @@ int runDaemon(int argc, char* argv[]) {
                             be = std::make_unique<jtag::ila::ChainIlaTapBackend>(ctx.chain(), dev_idx);
                         jtag::ila::IlaDriver drv(*be);
                         (void)drv.probe();
+                        (void)drv.resetCapture();  // guarantee FSM is IDLE before arm()
                         if (!drv.configureTrigger(mask, value, rise, fall, mask2, val2, or_mode, pre))
                             throw std::runtime_error(drv.lastError());
                         if (!drv.arm())

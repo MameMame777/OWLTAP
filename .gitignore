@@ -69,3 +69,6 @@ hdl/ila/examples/zybo_z7020_generated/ila_generated_bringup_top.sv
 hdl/ila/examples/zybo_z7020_generated/ila_generated_bringup.xdc
 hdl/ila/examples/zybo_z7020_generated/program_board.tcl
 hdl/ila/examples/zybo_z7020_generated/README.md
+CLAUDE.md
+instructions/base-instructions.md
+*.log

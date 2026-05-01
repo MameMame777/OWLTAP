@@ -1,6 +1,7 @@
 #include "register_tools.h"
 
 #include <chrono>
+#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -788,11 +789,31 @@ void registerHardwareTools(ToolRegistry& registry, ExecutorBridge& bridge) {
                         sample_arr.push_back(oss.str());
                     }
 
+                    // Load signal names from sidecar JSON if available.
+                    nlohmann::json signal_names = nlohmann::json::array();
+                    const std::string& sidecar =
+                        ctx.config().ila_config_json_path;
+                    if (!sidecar.empty()) {
+                        std::ifstream jf(sidecar);
+                        if (jf.is_open()) {
+                            try {
+                                auto j = nlohmann::json::parse(jf);
+                                if (j.contains("lanes") &&
+                                    j["lanes"].is_array()) {
+                                    for (const auto& lane : j["lanes"])
+                                        signal_names.push_back(
+                                            lane.value("name", ""));
+                                }
+                            } catch (...) {}
+                        }
+                    }
+
                     return nlohmann::json{
                         {"version",      caps.version},
                         {"data_width",   caps.data_w},
                         {"depth",        caps.depth},
                         {"sample_count", static_cast<int>(raw.size())},
+                        {"signal_names", signal_names},
                         {"samples",      sample_arr}};
                 },
                 "ila_run_capture",

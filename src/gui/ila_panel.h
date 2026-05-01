@@ -120,6 +120,12 @@ public:
     /// RTL SIG_DEF register during the last setBscaneChain()/setChain() call.
     bool hasSigDefsFromRtl() const { return rtl_sig_defs_loaded_; }
 
+    /// Path to the sidecar JSON produced by the ILA generator.
+    /// When set, signal names from the JSON override auto-generated names.
+    void setIlaConfigJsonPath(const std::string& path) {
+        ila_config_json_path_ = path;
+    }
+
     /// OR mode accessors (used by AppWindow to persist the setting).
     bool orMode() const     { return or_mode_; }
     void setOrMode(bool v)  { or_mode_ = v; }
@@ -185,6 +191,7 @@ private:
     std::vector<IlaSignalDef>  signals_;
     std::vector<LaneTrigger>   lane_triggers_;  // size always == signals_.size()
     bool                       rtl_sig_defs_loaded_ = false;
+    std::string                ila_config_json_path_;
 
     // Poll timer
     double last_poll_time_ = 0.0;

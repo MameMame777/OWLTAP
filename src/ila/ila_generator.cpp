@@ -5,6 +5,26 @@
 #include <sstream>
 
 namespace jtag::ila {
+
+std::string renderIlaConfigJson(const IlaGeneratorConfig& cfg) {
+    std::ostringstream o;
+    o << "{\n  \"lanes\": [\n";
+    for (size_t i = 0; i < cfg.lanes.size(); ++i) {
+        const auto& lane = cfg.lanes[i];
+        const char* fmt =
+            (lane.format == IlaGeneratorFormat::DEC) ? "DEC" :
+            (lane.format == IlaGeneratorFormat::BIN) ? "BIN" : "HEX";
+        o << "    {\"name\":\"" << lane.name << "\","
+          << "\"hi\":" << lane.hi << ","
+          << "\"lo\":" << lane.lo << ","
+          << "\"fmt\":\"" << fmt << "\"}";
+        if (i + 1 < cfg.lanes.size()) o << ",";
+        o << "\n";
+    }
+    o << "  ]\n}\n";
+    return o.str();
+}
+
 namespace {
 
 constexpr int kMaxLaneCount = 15;
@@ -415,6 +435,13 @@ bool writeIlaGeneratedFiles(const IlaGeneratorConfig& config,
     out.written_paths.push_back(build_bitstream_path);
     if (!writeTextFile(readme_path, out.readme_md, error)) return false;
     out.written_paths.push_back(readme_path);
+
+    const auto config_json_path =
+        out.output_dir / (config.project_name + "_config.json");
+    if (!writeTextFile(config_json_path, renderIlaConfigJson(config), error))
+        return false;
+    out.written_paths.push_back(config_json_path);
+    out.config_json_path = config_json_path;
 
     error.clear();
     return true;

@@ -339,7 +339,7 @@ AppWindow::AppWindow() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     window_ = glfwCreateWindow(1280, 800,
-                                "JTAG FPGA Waveform Viewer", nullptr, nullptr);
+                                "OWLTAP", nullptr, nullptr);
     if (!window_) {
         glfwTerminate();
         return;
@@ -507,7 +507,7 @@ void AppWindow::run() {
         if (show_about_) {
             if (ImGui::Begin("About", &show_about_,
                              ImGuiWindowFlags_AlwaysAutoResize)) {
-                ImGui::Text("JTAG FPGA Waveform Viewer");
+                ImGui::Text("OWLTAP");
                 ImGui::Separator();
                 ImGui::Text("Reads Xilinx FPGA pin states via JTAG boundary scan");
                 ImGui::Text("and displays them as logic analyzer waveforms.");
@@ -1824,6 +1824,7 @@ void AppWindow::onLoadConfig() {
 
     // Restore ILA signal lane definitions (no-op if empty)
     ila_panel_.importSignalConfigs(config_.ila_signals);
+    ila_panel_.setIlaConfigJsonPath(config_.ila_config_json_path);
     ila_panel_.setOrMode(config_.ila_or_mode);
 
     // Restore XDC aliases

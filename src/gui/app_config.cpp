@@ -309,6 +309,9 @@ bool AppConfig::save(const std::string& path) const {
         if (!ila_generator_lanes.empty()) f << "  ";
         f << "],\n";
 
+    // ILA sidecar JSON path
+    f << "  \"ila_config_json_path\": \"" << jsonEscape(ila_config_json_path) << "\",\n";
+
     // XDC pin alias file
     f << "  \"xdc_path\": \"" << jsonEscape(xdc_path) << "\",\n";
     f << "  \"ila_or_mode\": " << (ila_or_mode ? 1 : 0) << "\n";
@@ -355,9 +358,10 @@ AppConfig AppConfig::load(const std::string& path) {
     cfg.ila_generator_data_width = static_cast<int>(jsonInt(json, "ila_generator_data_width", 32));
     cfg.ila_generator_depth = static_cast<int>(jsonInt(json, "ila_generator_depth", 1024));
     cfg.ila_generator_idcode = static_cast<uint32_t>(jsonInt(json, "ila_generator_idcode", 0xA17A0001u));
-    cfg.ila_generator_lanes = jsonIlaSignalArray(json, "ila_generator_lanes");
-    cfg.xdc_path          = jsonString(json, "xdc_path");
-    cfg.ila_or_mode       = (jsonInt(json, "ila_or_mode", 0) != 0);
+    cfg.ila_generator_lanes    = jsonIlaSignalArray(json, "ila_generator_lanes");
+    cfg.ila_config_json_path   = jsonString(json, "ila_config_json_path");
+    cfg.xdc_path               = jsonString(json, "xdc_path");
+    cfg.ila_or_mode            = (jsonInt(json, "ila_or_mode", 0) != 0);
     return cfg;
 }
 

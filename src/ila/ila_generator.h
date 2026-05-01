@@ -47,7 +47,10 @@ struct IlaGeneratedFiles {
     std::string xdc;
     std::string readme_md;
     std::vector<std::filesystem::path> written_paths;
+    std::filesystem::path config_json_path;  // sidecar JSON with lane names
 };
+
+std::string renderIlaConfigJson(const IlaGeneratorConfig& config);
 
 bool validateIlaGeneratorConfig(const IlaGeneratorConfig& config,
                                 std::string& error);

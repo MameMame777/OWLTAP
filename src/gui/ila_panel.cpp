@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 
 #include "gui_daemon_client.h"
 #include "src/jtag/jtag_chain.h"
@@ -19,6 +20,51 @@ namespace jtag::gui {
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Apply lane names from sidecar ila_config.json (if present) to signals.
+// Matches by lane index; silently skips if file is missing or malformed.
+static void applyIlaConfigJsonNames(const std::string& json_path,
+                                    std::vector<IlaSignalDef>& signals) {
+    if (json_path.empty()) return;
+    std::ifstream f(json_path);
+    if (!f.is_open()) return;
+    std::string json((std::istreambuf_iterator<char>(f)),
+                      std::istreambuf_iterator<char>());
+
+    size_t p = json.find("\"lanes\"");
+    if (p == std::string::npos) return;
+    p = json.find('[', p);
+    if (p == std::string::npos) return;
+    ++p;
+
+    size_t lane_idx = 0;
+    while (p < json.size() && lane_idx < signals.size()) {
+        while (p < json.size() && (json[p] == ' ' || json[p] == '\t' ||
+               json[p] == '\n' || json[p] == '\r' || json[p] == ',')) ++p;
+        if (p >= json.size() || json[p] == ']') break;
+        if (json[p] != '{') { ++p; continue; }
+        size_t obj_end = json.find('}', p + 1);
+        if (obj_end == std::string::npos) break;
+        std::string obj = json.substr(p, obj_end - p + 1);
+        p = obj_end + 1;
+
+        size_t name_pos = obj.find("\"name\"");
+        if (name_pos != std::string::npos) {
+            size_t q = obj.find('"', name_pos + 6);
+            if (q != std::string::npos) {
+                size_t end = obj.find('"', q + 1);
+                if (end != std::string::npos) {
+                    std::string name = obj.substr(q + 1, end - q - 1);
+                    if (!name.empty())
+                        std::snprintf(signals[lane_idx].name,
+                                      sizeof(signals[lane_idx].name),
+                                      "%s", name.c_str());
+                }
+            }
+        }
+        ++lane_idx;
+    }
+}
 
 static uint32_t parseHex(const char* buf, uint32_t fallback) {
     uint32_t v = fallback;
@@ -310,6 +356,7 @@ void IlaPanel::setChain(jtag::JtagChain* chain, int device_index) {
                     signals_.push_back(d);
                 }
                 lane_triggers_.assign(signals_.size(), LaneTrigger{});
+                applyIlaConfigJsonNames(ila_config_json_path_, signals_);
                 loaded = true;
             }
         }
@@ -352,6 +399,7 @@ void IlaPanel::setBscaneChain(jtag::JtagChain* chain, int pl_tap_index,
                     signals_.push_back(d);
                 }
                 lane_triggers_.assign(signals_.size(), LaneTrigger{});
+                applyIlaConfigJsonNames(ila_config_json_path_, signals_);
                 loaded = true;
             }
         }

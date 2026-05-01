@@ -325,6 +325,8 @@ void IlaGeneratorDialog::draw(bool* p_open, AppConfig* config) {
                         error_message_ = error;
                         success_message_.clear();
                     } else {
+                        config->ila_config_json_path =
+                            files.config_json_path.string();
                         persistToConfig(config);
                         error_message_.clear();
                         success_message_ = "Generated " + std::to_string(files.written_paths.size()) +

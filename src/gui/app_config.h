@@ -72,6 +72,9 @@ struct AppConfig {
     uint32_t ila_generator_idcode = 0xA17A0001u;
     std::vector<IlaSignalConfig> ila_generator_lanes;
 
+    // ILA sidecar JSON path (set automatically by ILA generator)
+    std::string ila_config_json_path;
+
     // XDC pin alias file (optional)
     std::string xdc_path;
 
